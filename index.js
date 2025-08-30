@@ -15,27 +15,18 @@ const { createClient } = require("@supabase/supabase-js");
 
 const log = P({ level: "info" });
 
-// 🚀 Inisialisasi Supabase
+// 🚀 Supabase
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-// Debug env
-console.log("DEBUG SUPABASE_URL:", SUPABASE_URL);
-console.log(
-  "DEBUG SUPABASE_SERVICE_KEY:",
-  SUPABASE_SERVICE_KEY ? "✅ Ada" : "❌ Kosong"
-);
-
 let supabase = null;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.warn(
-    "⚠️ SUPABASE_URL atau SUPABASE_SERVICE_KEY belum diisi. Layanan database akan dimatikan sementara."
-  );
+  console.warn("⚠️ SUPABASE_URL atau SUPABASE_SERVICE_KEY belum diisi. Database OFF.");
 } else {
   supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 }
 
-// 🔎 Utility: deteksi jenjang
+// 🔎 Utility parse jenjang
 function parseJenjang(text) {
   const t = (text || "").toUpperCase();
   if (/\bTK\b/.test(t)) return "TK";
@@ -45,21 +36,23 @@ function parseJenjang(text) {
   return null;
 }
 
-// 🔎 Query Supabase: Semua kuota
+// 🔎 Utility reply dengan footer
+function withFooter(text) {
+  return `${text}\n\n👉 Ketik *MENU* untuk kembali ke menu utama.`;
+}
+
+// 🔎 Kuota
 async function getAllKuota() {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("kuota_ppdb")
     .select("jenjang_kode, jumlah, tahun_ajaran")
     .order("jenjang_kode", { ascending: true });
-  if (error) {
-    console.error("Supabase getAllKuota error", error);
-    return null;
-  }
-  if (!data || data.length === 0) return null;
-  const tahun = data[0].tahun_ajaran || "";
-  const lines = data.map((d) => `• ${d.jenjang_kode}: ${d.jumlah}`).join("\n");
-  return `Kuota PPDB ${tahun}:\n${lines}\n\nKetik: KUOTA TK/SD/SMP/SMA untuk detail per jenjang.`;
+  if (error || !data || data.length === 0) return null;
+
+  const tahun = data[0].tahun_ajaran;
+  const lines = data.map(d => `• ${d.jenjang_kode}: ${d.jumlah}`).join("\n");
+  return `📊 Kuota PPDB ${tahun}:\n${lines}\n\nKetik: KUOTA TK/SD/SMP/SMA untuk detail.`;
 }
 
 async function getKuotaByJenjang(kode) {
@@ -70,100 +63,128 @@ async function getKuotaByJenjang(kode) {
     .eq("jenjang_kode", kode)
     .order("id", { ascending: false })
     .limit(1);
-
-  if (error) {
-    console.error("Supabase getKuotaByJenjang error", error);
-    return null;
-  }
-  if (!data || data.length === 0) return null;
-  const { jumlah, tahun_ajaran } = data[0];
-  return `Kuota ${kode} tahun ajaran ${tahun_ajaran}: ${jumlah} siswa.`;
+  if (error || !data || data.length === 0) return null;
+  return `📊 Kuota ${kode} ${data[0].tahun_ajaran}: ${data[0].jumlah} siswa.`;
 }
 
-// 🔎 Query Supabase: Biaya
-async function getBiaya() {
+// 🔎 Biaya
+async function getBiayaAll() {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("biaya_ppdb")
-    .select("deskripsi, nominal")
-    .order("id", { ascending: true });
+    .select("jenjang_kode, tahun_ajaran, formulir, spp, uang_pangkal, seragam, kegiatan")
+    .order("jenjang_kode", { ascending: true });
+  if (error || !data || data.length === 0) return null;
 
-  if (error) {
-    console.error("Supabase getBiaya error", error);
-    return null;
-  }
-  if (!data || data.length === 0) return null;
-
-  const lines = data
-    .map((d) => `• ${d.deskripsi}: Rp${d.nominal.toLocaleString("id-ID")}`)
-    .join("\n");
-  return `Biaya PPDB:\n${lines}`;
+  const tahun = data[0].tahun_ajaran;
+  let lines = data.map(b =>
+    `\n📌 ${b.jenjang_kode}:\n` +
+    `• Formulir: Rp ${b.formulir.toLocaleString()}\n` +
+    `• Uang Pangkal: Rp ${b.uang_pangkal.toLocaleString()}\n` +
+    `• SPP: Rp ${b.spp.toLocaleString()}/bulan\n` +
+    `• Seragam: Rp ${b.seragam.toLocaleString()}\n` +
+    `• Kegiatan: Rp ${b.kegiatan.toLocaleString()}`
+  ).join("\n");
+  return `💰 Biaya PPDB ${tahun}:${lines}`;
 }
 
-// 🔎 Query Supabase: FAQ
+async function getBiayaByJenjang(kode) {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("biaya_ppdb")
+    .select("tahun_ajaran, formulir, spp, uang_pangkal, seragam, kegiatan")
+    .eq("jenjang_kode", kode)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error || !data || data.length === 0) return null;
+
+  const b = data[0];
+  return `💰 Biaya ${kode} ${b.tahun_ajaran}:\n` +
+         `• Formulir: Rp ${b.formulir.toLocaleString()}\n` +
+         `• Uang Pangkal: Rp ${b.uang_pangkal.toLocaleString()}\n` +
+         `• SPP: Rp ${b.spp.toLocaleString()}/bulan\n` +
+         `• Seragam: Rp ${b.seragam.toLocaleString()}\n` +
+         `• Kegiatan: Rp ${b.kegiatan.toLocaleString()}`;
+}
+
+// 🔎 FAQ
 async function getFaq(keyword, subkey = null) {
   if (!supabase) return null;
   let query = supabase.from("faq").select("konten").eq("keyword", keyword);
   if (subkey) query = query.eq("subkey", subkey);
   else query = query.is("subkey", null);
   const { data, error } = await query.limit(1);
-  if (error) {
-    console.error("Supabase getFaq error", error);
-    return null;
-  }
-  if (!data || data.length === 0) return null;
+  if (error || !data || data.length === 0) return null;
   return data[0].konten;
 }
 
-// 📌 Pesan bantuan
-const HELP_TEXT = `Halo! Selamat datang di Chatbot PPDB.\n\nKetik salah satu kata kunci:\n• KUOTA — lihat kuota TK–SMA\n• KUOTA TK/SD/SMP/SMA — detail per jenjang\n• SYARAT — persyaratan\n• BIAYA — info biaya\n• MENU — tampilkan menu ini.`;
+// 📌 HELP
+const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉  
+Aku siap bantu jawab semua pertanyaan kamu tentang pendaftaran sekolah.  
+
+📌 *Ketik salah satu kata kunci berikut ini ya:*  
+
+1️⃣ *KUOTA*  
+   ➝ Lihat kuota semua jenjang  
+   ➝ Contoh: KUOTA TK / KUOTA SD  
+
+2️⃣ *BIAYA*  
+   ➝ Info biaya per jenjang  
+   ➝ Contoh: BIAYA SMP / BIAYA SMA  
+
+3️⃣ *SYARAT*  
+   ➝ Persyaratan pendaftaran  
+
+4️⃣ *JADWAL*  
+   ➝ Jadwal PPDB terbaru  
+
+5️⃣ *PENDAFTARAN*  
+   ➝ Cara Pendaftaran
+
+6️⃣ *KONTAK*  
+   ➝ Hubungi admin langsung 
+
+7️⃣ *BEASISWA*  
+   ➝ Informasi beasiswa
+
+💡 *Tips:*  
+Ketik *MENU* kapan aja untuk kembali ke daftar ini.  
+`;
 
 // =====================================
 // 🚀 Start Bot
 // =====================================
-let latestQrData = null; // simpan QR terbaru
+let latestQrData = null;
 async function startBot() {
   const authDir = path.join(__dirname, "auth_info");
-  if (!fs.existsSync(authDir)) {
-    fs.mkdirSync(authDir);
-  }
+  if (!fs.existsSync(authDir)) fs.mkdirSync(authDir);
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-
-  const { version, isLatest } = await fetchLatestBaileysVersion().catch(() => ({
+  const { version } = await fetchLatestBaileysVersion().catch(() => ({
     version: [4, 0, 0],
-    isLatest: false,
   }));
-  log.info(`Using WA Baileys version: ${version}, isLatest: ${isLatest}`);
 
   const sock = makeWASocket({
     logger: log,
-    printQRInTerminal: false, // kita pakai qrcode-terminal manual
+    printQRInTerminal: false,
     auth: state,
     version,
   });
 
   sock.ev.on("creds.update", saveCreds);
-
-  // 🔑 Listener koneksi
   sock.ev.on("connection.update", (update) => {
     const { connection, qr, lastDisconnect } = update;
     if (qr) {
-      latestQrData = qr; // simpan untuk /qr
-      console.log("📌 Scan QR ini pakai WhatsApp HP kamu:");
+      latestQrData = qr;
+      console.log("📌 Scan QR ini:");
       qrcode.generate(qr, { small: true });
     }
-    if (connection === "open") {
-      console.log("✅ Bot sudah terhubung ke WhatsApp!");
-    }
+    if (connection === "open") console.log("✅ Bot sudah online!");
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
-      console.log("❌ Koneksi terputus, mencoba ulang...");
-      if (code !== DisconnectReason.loggedOut) {
-        startBot();
-      } else {
-        console.log("🔒 Logged out. Hapus folder auth_info dan scan ulang QR.");
-      }
+      console.log("❌ Koneksi terputus, reconnect...");
+      if (code !== DisconnectReason.loggedOut) startBot();
+      else console.log("🔒 Logged out. Hapus auth_info & scan ulang QR.");
     }
   });
 
@@ -173,10 +194,8 @@ async function startBot() {
       const msg = m.messages[0];
       if (!msg.message) return;
       if (msg.key.fromMe) return;
-
       const from = msg.key.remoteJid;
-      const isGroup = from.endsWith("@g.us");
-      if (isGroup) return;
+      if (from.endsWith("@g.us")) return; // skip grup
 
       const text = (
         msg.message.conversation ||
@@ -184,52 +203,46 @@ async function startBot() {
         msg.message.imageMessage?.caption ||
         ""
       ).trim();
-
-      console.log("📩 Pesan masuk:", text);
       if (!text) return;
 
+      console.log("📩 Pesan:", text);
       const lower = text.toLowerCase();
 
-      if (["menu", "help", "mulai", "start"].includes(lower)) {
-        await sock.sendMessage(from, { text: HELP_TEXT });
-        return;
+      // menu/help/start/mulai tanpa footer
+      if (["menu", "help", "start", "mulai"].includes(lower)) {
+        return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
       if (lower.includes("kuota")) {
         const jenjang = parseJenjang(text);
-        if (jenjang) {
-          const resp = await getKuotaByJenjang(jenjang);
-          await sock.sendMessage(from, {
-            text: resp || "Data kuota tidak ditemukan.",
-          });
-        } else {
-          const resp = await getAllKuota();
-          await sock.sendMessage(from, {
-            text: resp || "Data kuota tidak tersedia.",
-          });
-        }
-        return;
+        const resp = jenjang
+          ? await getKuotaByJenjang(jenjang)
+          : await getAllKuota();
+        return sock.sendMessage(from, { text: withFooter(resp || "❌ Data kuota tidak tersedia.") });
+      }
+
+      if (lower.includes("biaya")) {
+        const jenjang = parseJenjang(text);
+        const resp = jenjang
+          ? await getBiayaByJenjang(jenjang)
+          : await getBiayaAll();
+        return sock.sendMessage(from, { text: withFooter(resp || "❌ Data biaya tidak tersedia.") });
       }
 
       if (lower.includes("syarat")) {
         const jenjang = parseJenjang(text);
-        const f = await getFaq("syarat", jenjang);
-        await sock.sendMessage(from, {
-          text: f || "Informasi syarat belum tersedia.",
-        });
-        return;
+        const resp = await getFaq("syarat", jenjang);
+        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info syarat belum ada.") });
       }
 
-      if (lower.includes("biaya")) {
-        const resp = await getBiaya();
-        await sock.sendMessage(from, {
-          text: resp || "Informasi biaya belum tersedia.",
-        });
-        return;
+      if (["jadwal", "pendaftaran", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
+        const key = ["jadwal", "pendaftaran", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
+        const resp = await getFaq(key);
+        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
 
-      // fallback
-      await sock.sendMessage(from, { text: HELP_TEXT });
+      // fallback: tampilkan menu (juga tanpa footer)
+      return sock.sendMessage(from, { text: HELP_TEXT });
     } catch (err) {
       console.error("messages.upsert error", err);
     }
@@ -238,24 +251,24 @@ async function startBot() {
   return sock;
 }
 
-// Jalankan bot
-startBot().catch((err) => {
-  console.error("startBot error", err);
-});
+startBot().catch(err => console.error("startBot error", err));
 
 // =====================================
-// 🌍 Web server kecil untuk UptimeRobot
+// 🌍 Web server
 // =====================================
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.get("/", (req, res) => res.send("✅ Bot WhatsApp PPDB sedang berjalan 24 jam..."));
+app.get("/", (req, res) =>
+  res.send("✅ Bot WhatsApp PPDB aktif di Railway...")
+);
 
-// Tambahan: route QR agar bisa di-scan via browser
 app.get("/qr", async (req, res) => {
   if (!latestQrData) return res.send("⚠️ QR belum tersedia / sudah discan.");
   const img = await QRCode.toDataURL(latestQrData);
-  res.send(`<h2>Silakan scan QR WhatsApp</h2><img src="${img}" />`);
+  res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
 });
 
-app.listen(port, () => console.log(`🌍 Web server berjalan di port ${port}`));
+app.listen(port, () =>
+  console.log(`🌍 Web server berjalan di port ${port}`)
+);
