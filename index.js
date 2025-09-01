@@ -120,35 +120,18 @@ async function getFaq(keyword, subkey = null) {
 
 // 📌 HELP
 const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉  
-Aku siap bantu jawab semua pertanyaan kamu tentang pendaftaran sekolah.  
 
 📌 *Ketik salah satu kata kunci berikut ini ya:*  
 
-1️⃣ *KUOTA*  
-   ➝ Lihat kuota semua jenjang  
-   ➝ Contoh: KUOTA TK / KUOTA SD  
+1️⃣ *KUOTA* → Lihat kuota semua jenjang  
+2️⃣ *BIAYA* → Info biaya per jenjang  
+3️⃣ *SYARAT* → Persyaratan pendaftaran  
+4️⃣ *JADWAL* → Jadwal PPDB terbaru  
+5️⃣ *PENDAFTARAN* → Cara pendaftaran  
+6️⃣ *KONTAK* → Hubungi admin  
+7️⃣ *BEASISWA* → Info beasiswa  
 
-2️⃣ *BIAYA*  
-   ➝ Info biaya per jenjang  
-   ➝ Contoh: BIAYA SMP / BIAYA SMA  
-
-3️⃣ *SYARAT*  
-   ➝ Persyaratan pendaftaran  
-
-4️⃣ *JADWAL*  
-   ➝ Jadwal PPDB terbaru  
-
-5️⃣ *PENDAFTARAN*  
-   ➝ Cara Pendaftaran
-
-6️⃣ *KONTAK*  
-   ➝ Hubungi admin langsung 
-
-7️⃣ *BEASISWA*  
-   ➝ Informasi beasiswa
-
-💡 *Tips:*  
-Ketik *MENU* kapan aja untuk kembali ke daftar ini.  
+💡 Ketik *MENU* kapan saja untuk kembali ke daftar ini.
 `;
 
 // =====================================
@@ -194,8 +177,23 @@ async function startBot() {
       const msg = m.messages[0];
       if (!msg.message) return;
       if (msg.key.fromMe) return;
-      const from = msg.key.remoteJid;
+      const from = msg.key.remoteJid; // nomor WA
       if (from.endsWith("@g.us")) return; // skip grup
+
+      const nama = msg.pushName || "Tanpa Nama";
+      const nomor = from.replace("@s.whatsapp.net", "");
+
+      // ✅ Simpan otomatis nomor & nama ke database
+      if (supabase) {
+        const { error } = await supabase
+          .from("users_wa") // nama tabel
+          .upsert(
+            { nomor, nama },
+            { onConflict: "nomor" }
+          );
+        if (error) console.error("❌ Gagal simpan user:", error.message);
+        else console.log(`✅ User tersimpan: ${nomor} - ${nama}`);
+      }
 
       const text = (
         msg.message.conversation ||
@@ -241,8 +239,9 @@ async function startBot() {
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
 
-      // fallback: tampilkan menu (juga tanpa footer)
+      // fallback
       return sock.sendMessage(from, { text: HELP_TEXT });
+
     } catch (err) {
       console.error("messages.upsert error", err);
     }
