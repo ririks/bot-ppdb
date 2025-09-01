@@ -26,7 +26,9 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 }
 
-// 🔎 Utility parse jenjang
+// =====================================
+// 🔎 Utility Functions
+// =====================================
 function parseJenjang(text) {
   const t = (text || "").toUpperCase();
   if (/\bTK\b/.test(t)) return "TK";
@@ -36,12 +38,10 @@ function parseJenjang(text) {
   return null;
 }
 
-// 🔎 Utility reply dengan footer
 function withFooter(text) {
   return `${text}\n\n👉 Ketik *MENU* untuk kembali ke menu utama.`;
 }
 
-// 🔎 Kuota
 async function getAllKuota() {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -67,7 +67,6 @@ async function getKuotaByJenjang(kode) {
   return `📊 Kuota ${kode} ${data[0].tahun_ajaran}: ${data[0].jumlah} siswa.`;
 }
 
-// 🔎 Biaya
 async function getBiayaAll() {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -107,7 +106,6 @@ async function getBiayaByJenjang(kode) {
          `• Kegiatan: Rp ${b.kegiatan.toLocaleString()}`;
 }
 
-// 🔎 FAQ
 async function getFaq(keyword, subkey = null) {
   if (!supabase) return null;
   let query = supabase.from("faq").select("konten").eq("keyword", keyword);
@@ -118,7 +116,7 @@ async function getFaq(keyword, subkey = null) {
   return data[0].konten;
 }
 
-// 📌 HELP
+// 📌 HELP Text
 const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉  
 
 📌 *Ketik salah satu kata kunci berikut ini ya:*  
@@ -183,16 +181,16 @@ async function startBot() {
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
 
-      // ✅ Simpan otomatis nomor & nama ke database
+      // ✅ Selalu update nama terbaru ke database
       if (supabase) {
         const { error } = await supabase
-          .from("users_wa") // nama tabel
+          .from("users_wa")
           .upsert(
-            { nomor, nama },
+            { nomor, nama },  // kalau nama berubah, langsung overwrite
             { onConflict: "nomor" }
           );
-        if (error) console.error("❌ Gagal simpan user:", error.message);
-        else console.log(`✅ User tersimpan: ${nomor} - ${nama}`);
+        if (error) console.error("❌ Gagal simpan/update user:", error.message);
+        else console.log(`✅ User tersimpan/diupdate: ${nomor} - ${nama}`);
       }
 
       const text = (
@@ -206,7 +204,6 @@ async function startBot() {
       console.log("📩 Pesan:", text);
       const lower = text.toLowerCase();
 
-      // menu/help/start/mulai tanpa footer
       if (["menu", "help", "start", "mulai"].includes(lower)) {
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
