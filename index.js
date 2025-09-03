@@ -15,7 +15,9 @@ const { createClient } = require("@supabase/supabase-js");
 
 const log = P({ level: "info" });
 
+// =====================================
 // 🚀 Supabase
+// =====================================
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -42,6 +44,9 @@ function withFooter(text) {
   return `${text}\n\n👉 Ketik *MENU* untuk kembali ke menu utama.`;
 }
 
+// =====================================
+// 📊 Query Supabase
+// =====================================
 async function getAllKuota() {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -116,7 +121,9 @@ async function getFaq(keyword, subkey = null) {
   return data[0].konten;
 }
 
+// =====================================
 // 📌 HELP Text
+// =====================================
 const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉  
 
 📌 *Ketik salah satu kata kunci berikut ini ya:*  
@@ -125,7 +132,7 @@ const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉
 2️⃣ *BIAYA* → Info biaya per jenjang  
 3️⃣ *SYARAT* → Persyaratan pendaftaran  
 4️⃣ *JADWAL* → Jadwal PPDB terbaru  
-5️⃣ *PENDAFTARAN* → Cara pendaftaran  
+5️⃣ *PENDAFTARAN* → Daftar langsung dari WhatsApp  
 6️⃣ *KONTAK* → Hubungi admin  
 7️⃣ *BEASISWA* → Info beasiswa  
 
@@ -169,28 +176,24 @@ async function startBot() {
     }
   });
 
-  // 📩 Listener pesan
+  // =====================================
+  // 📝 Pesan masuk
+  // =====================================
   sock.ev.on("messages.upsert", async (m) => {
     try {
       const msg = m.messages[0];
       if (!msg.message) return;
       if (msg.key.fromMe) return;
-      const from = msg.key.remoteJid; // nomor WA
-      if (from.endsWith("@g.us")) return; // skip grup
+      const from = msg.key.remoteJid;
+      if (from.endsWith("@g.us")) return;
 
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
 
-      // ✅ Selalu update nama terbaru ke database
       if (supabase) {
-        const { error } = await supabase
+        await supabase
           .from("users_wa")
-          .upsert(
-            { nomor, nama },  // kalau nama berubah, langsung overwrite
-            { onConflict: "nomor" }
-          );
-        if (error) console.error("❌ Gagal simpan/update user:", error.message);
-        else console.log(`✅ User tersimpan/diupdate: ${nomor} - ${nama}`);
+          .upsert({ nomor, nama }, { onConflict: "nomor" });
       }
 
       const text = (
@@ -201,13 +204,14 @@ async function startBot() {
       ).trim();
       if (!text) return;
 
-      console.log("📩 Pesan:", text);
       const lower = text.toLowerCase();
 
+      // ===== MENU =====
       if (["menu", "help", "start", "mulai"].includes(lower)) {
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
+      // ===== KUOTA =====
       if (lower.includes("kuota")) {
         const jenjang = parseJenjang(text);
         const resp = jenjang
@@ -216,6 +220,7 @@ async function startBot() {
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Data kuota tidak tersedia.") });
       }
 
+      // ===== BIAYA =====
       if (lower.includes("biaya")) {
         const jenjang = parseJenjang(text);
         const resp = jenjang
@@ -224,16 +229,65 @@ async function startBot() {
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Data biaya tidak tersedia.") });
       }
 
+      // ===== SYARAT =====
       if (lower.includes("syarat")) {
         const jenjang = parseJenjang(text);
         const resp = await getFaq("syarat", jenjang);
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info syarat belum ada.") });
       }
 
+      // ===== JADWAL / KONTAK / BEASISWA =====
       if (["jadwal", "pendaftaran", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
         const key = ["jadwal", "pendaftaran", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
         const resp = await getFaq(key);
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
+      }
+
+      // ===== PENDAFTARAN =====
+      if (lower.includes("pendaftaran")) {
+        const jenjang = parseJenjang(text);
+        if (!jenjang) return sock.sendMessage(from, { text: "❌ Mohon sebutkan jenjang: TK, SD, SMP, SMA." });
+
+        await sock.sendMessage(from, { text: `📝 Pendaftaran ${jenjang}\nSilakan kirim data dalam format:\n\nNama Lengkap | Tanggal Lahir | KK | Akta Lahir${jenjang === "SMP" || jenjang === "SMA" ? " | Rapor Terakhir" : ""}` });
+
+        // simpan state sementara di memori (bisa pakai Redis/Supabase kalau ingin persistent)
+        if (!global.pendingRegistrations) global.pendingRegistrations = {};
+        global.pendingRegistrations[nomor] = { jenjang };
+        return;
+      }
+
+      // ===== HANDLE DATA PENDAFTARAN =====
+      if (global.pendingRegistrations && global.pendingRegistrations[nomor]) {
+        const dataArr = text.split("|").map(d => d.trim());
+        const { jenjang } = global.pendingRegistrations[nomor];
+
+        let valid = false;
+        if (jenjang === "TK" || jenjang === "SD") {
+          valid = dataArr.length === 4; // Nama | TTL | KK | Akta
+        } else if (jenjang === "SMP" || jenjang === "SMA") {
+          valid = dataArr.length === 5; // Nama | TTL | KK | Akta | Rapor
+        }
+
+        if (!valid) return sock.sendMessage(from, { text: "❌ Format data salah, silakan coba lagi sesuai instruksi." });
+
+        // simpan ke Supabase
+        const [namaLengkap, ttl, kk, akta, rapor] = dataArr;
+        const payload = {
+          nomor,
+          jenjang,
+          nama: namaLengkap,
+          ttl,
+          kk,
+          akta,
+          rapor: rapor || null,
+          created_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase.from("pendaftaran_ppdb").insert(payload);
+        if (error) return sock.sendMessage(from, { text: "❌ Gagal mendaftar. Silakan coba lagi." });
+
+        delete global.pendingRegistrations[nomor];
+        return sock.sendMessage(from, { text: `✅ Pendaftaran ${jenjang} berhasil!\nTerima kasih ${namaLengkap}.` });
       }
 
       // fallback
@@ -256,7 +310,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.get("/", (req, res) =>
-  res.send("✅ Bot WhatsApp PPDB aktif di Railway...")
+  res.send("✅ Bot WhatsApp PPDB aktif...")
 );
 
 app.get("/qr", async (req, res) => {
