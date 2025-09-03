@@ -132,7 +132,7 @@ const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉
 2️⃣ *BIAYA* → Info biaya per jenjang  
 3️⃣ *SYARAT* → Persyaratan pendaftaran  
 4️⃣ *JADWAL* → Jadwal PPDB terbaru  
-5️⃣ *PENDAFTARAN* → Daftar langsung dari WhatsApp  
+5️⃣ *DAFTAR* → Daftar langsung dari WhatsApp  
 6️⃣ *KONTAK* → Hubungi admin  
 7️⃣ *BEASISWA* → Info beasiswa  
 
@@ -236,21 +236,13 @@ async function startBot() {
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info syarat belum ada.") });
       }
 
-      // ===== JADWAL / KONTAK / BEASISWA =====
-      if (["jadwal", "pendaftaran", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
-        const key = ["jadwal", "pendaftaran", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
-        const resp = await getFaq(key);
-        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
-      }
-
-      // ===== PENDAFTARAN =====
-      if (lower.includes("pendaftaran")) {
+      // ===== DAFTAR INTERAKTIF =====
+      if (lower.includes("daftar")) {
         const jenjang = parseJenjang(text);
-        if (!jenjang) return sock.sendMessage(from, { text: "❌ Mohon sebutkan jenjang: TK, SD, SMP, SMA." });
+        if (!jenjang) return sock.sendMessage(from, { text: "❌ Mohon sebutkan jenjang: TK, SD, SMP, SMA.\nContoh: DAFTAR SD" });
 
         await sock.sendMessage(from, { text: `📝 Pendaftaran ${jenjang}\nSilakan kirim data dalam format:\n\nNama Lengkap | Tanggal Lahir | KK | Akta Lahir${jenjang === "SMP" || jenjang === "SMA" ? " | Rapor Terakhir" : ""}` });
 
-        // simpan state sementara di memori (bisa pakai Redis/Supabase kalau ingin persistent)
         if (!global.pendingRegistrations) global.pendingRegistrations = {};
         global.pendingRegistrations[nomor] = { jenjang };
         return;
@@ -262,32 +254,25 @@ async function startBot() {
         const { jenjang } = global.pendingRegistrations[nomor];
 
         let valid = false;
-        if (jenjang === "TK" || jenjang === "SD") {
-          valid = dataArr.length === 4; // Nama | TTL | KK | Akta
-        } else if (jenjang === "SMP" || jenjang === "SMA") {
-          valid = dataArr.length === 5; // Nama | TTL | KK | Akta | Rapor
-        }
+        if (jenjang === "TK" || jenjang === "SD") valid = dataArr.length === 4;
+        if (jenjang === "SMP" || jenjang === "SMA") valid = dataArr.length === 5;
 
         if (!valid) return sock.sendMessage(from, { text: "❌ Format data salah, silakan coba lagi sesuai instruksi." });
 
-        // simpan ke Supabase
         const [namaLengkap, ttl, kk, akta, rapor] = dataArr;
-        const payload = {
-          nomor,
-          jenjang,
-          nama: namaLengkap,
-          ttl,
-          kk,
-          akta,
-          rapor: rapor || null,
-          created_at: new Date().toISOString(),
-        };
-
+        const payload = { nomor, jenjang, nama: namaLengkap, ttl, kk, akta, rapor: rapor || null, created_at: new Date().toISOString() };
         const { error } = await supabase.from("pendaftaran_ppdb").insert(payload);
         if (error) return sock.sendMessage(from, { text: "❌ Gagal mendaftar. Silakan coba lagi." });
 
         delete global.pendingRegistrations[nomor];
         return sock.sendMessage(from, { text: `✅ Pendaftaran ${jenjang} berhasil!\nTerima kasih ${namaLengkap}.` });
+      }
+
+      // ===== FAQ / INFO LAIN =====
+      if (["jadwal", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
+        const key = ["jadwal", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
+        const resp = await getFaq(key);
+        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
 
       // fallback
