@@ -59,7 +59,7 @@ async function getFaq(keyword, subkey = null) {
 // =====================================
 const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉  
 
-📌 *Ketik salah satu kata kunci berikut ini ya:*  
+📌 *Ketik salah satu kata kunci berikut ini:*  
 
 1️⃣ *KUOTA* → Lihat kuota semua jenjang  
 2️⃣ *BIAYA* → Info biaya per jenjang  
@@ -172,35 +172,68 @@ async function startBot() {
           case 3:
             const jenjang = parseJenjang(text);
             if (!jenjang) return sock.sendMessage(from, { text: "❌ Jenjang tidak valid, masukkan TK/SD/SMP/SMA:" });
-            session.data.jenjang = jenjang;
+            session.data.jenjang_kode = jenjang;
             session.step++;
             return sock.sendMessage(from, { text: "Langkah 4: Masukkan *Nomor KK*:" });
 
           case 4:
             session.data.nomor_kk = text;
             session.step++;
-            return sock.sendMessage(from, { text: "Langkah 5: Silahkan kirim *foto KK* (gambar):" });
+            return sock.sendMessage(from, { text: "Langkah 5: Kirim *foto KK* (gambar):" });
 
           case 5:
             if (msg.message.imageMessage) {
-              // Download image
-              const stream = await downloadContentFromMessage(msg.message.imageMessage, "buffer");
-              const filePath = path.join(__dirname, "uploads", `${nomor}_kk.jpg`);
-              if (!fs.existsSync(path.join(__dirname, "uploads"))) fs.mkdirSync(path.join(__dirname, "uploads"));
-              const buffers = [];
-              for await (const chunk of stream) buffers.push(chunk);
-              fs.writeFileSync(filePath, Buffer.concat(buffers));
-              session.data.foto_kk = filePath;
+              const filePath = await saveImage(msg.message.imageMessage, nomor, "kk");
+              session.data.kk_url = filePath;
+
+              if (session.data.jenjang_kode === "SMP" || session.data.jenjang_kode === "SMA") {
+                session.step++;
+                return sock.sendMessage(from, { text: "Langkah 6: Kirim *foto Rapor* (gambar):" });
+              } else {
+                session.step = 8; // TK/SD langsung ke foto peserta
+                return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Peserta* (gambar):" });
+              }
+            } else {
+              return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
+            }
+
+          case 6: // Rapor/Ijazah SMP/SMA
+            if (msg.message.imageMessage) {
+              const filePath = await saveImage(msg.message.imageMessage, nomor, "rapor");
+              session.data.rapor_url = filePath;
+              session.step++;
+              return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
+            } else {
+              return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Rapor*." });
+            }
+
+          case 7: // Ijazah SMP/SMA
+            if (msg.message.imageMessage) {
+              const filePath = await saveImage(msg.message.imageMessage, nomor, "ijazah");
+              session.data.ijazah_url = filePath;
+              session.step++;
+              return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
+            } else {
+              return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Ijazah*." });
+            }
+
+          case 8: // Foto Peserta
+            if (msg.message.imageMessage) {
+              const filePath = await saveImage(msg.message.imageMessage, nomor, "foto");
+              session.data.foto_url = filePath;
 
               // Simpan ke Supabase
               if (supabase) {
                 await supabase.from("pendaftaran_ppdb").insert([{
                   nomor,
-                  nama_siswa: session.data.nama_siswa,
-                  tgl_lahir: session.data.tgl_lahir,
-                  jenjang: session.data.jenjang,
-                  nomor_kk: session.data.nomor_kk,
-                  foto_kk: session.data.foto_kk,
+                  nama: session.data.nama_siswa,
+                  jenjang_kode: session.data.jenjang_kode,
+                  kk_url: session.data.kk_url,
+                  akta_lahir_url: session.data.akta_lahir_url || null,
+                  rapor_url: session.data.rapor_url || null,
+                  ijazah_url: session.data.ijazah_url || null,
+                  foto_url: session.data.foto_url,
+                  status: "pending",
                   created_at: new Date().toISOString(),
                 }]);
               }
@@ -208,7 +241,7 @@ async function startBot() {
               sessions[nomor] = null;
               return sock.sendMessage(from, { text: "✅ Pendaftaran berhasil! Terima kasih." });
             } else {
-              return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
+              return sock.sendMessage(from, { text: "❌ Tolong kirim *Foto Peserta*." });
             }
 
           default:
@@ -226,6 +259,20 @@ async function startBot() {
   });
 
   return sock;
+}
+
+// Helper untuk save image
+async function saveImage(imageMessage, nomor, type) {
+  const stream = await downloadContentFromMessage(imageMessage, "buffer");
+  const uploadDir = path.join(__dirname, "uploads");
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+  const filePath = path.join(uploadDir, `${nomor}_${type}_${Date.now()}.jpg`);
+  const buffers = [];
+  for await (const chunk of stream) buffers.push(chunk);
+  fs.writeFileSync(filePath, Buffer.concat(buffers));
+
+  return filePath; // bisa diganti dengan URL Supabase Storage jika mau upload ke cloud
 }
 
 startBot().catch(err => console.error("startBot error", err));
