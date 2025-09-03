@@ -5,6 +5,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadContentFromMessage,
 } = require("@whiskeysockets/baileys");
 const qrcode = require("qrcode-terminal");
 const QRCode = require("qrcode");
@@ -15,9 +16,7 @@ const { createClient } = require("@supabase/supabase-js");
 
 const log = P({ level: "info" });
 
-// =====================================
 // 🚀 Supabase
-// =====================================
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -44,73 +43,7 @@ function withFooter(text) {
   return `${text}\n\n👉 Ketik *MENU* untuk kembali ke menu utama.`;
 }
 
-// =====================================
-// 📊 Query Supabase
-// =====================================
-async function getAllKuota() {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("kuota_ppdb")
-    .select("jenjang_kode, jumlah, tahun_ajaran")
-    .order("jenjang_kode", { ascending: true });
-  if (error || !data || data.length === 0) return null;
-
-  const tahun = data[0].tahun_ajaran;
-  const lines = data.map(d => `• ${d.jenjang_kode}: ${d.jumlah}`).join("\n");
-  return `📊 Kuota PPDB ${tahun}:\n${lines}\n\nKetik: KUOTA TK/SD/SMP/SMA untuk detail.`;
-}
-
-async function getKuotaByJenjang(kode) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("kuota_ppdb")
-    .select("jumlah,tahun_ajaran")
-    .eq("jenjang_kode", kode)
-    .order("id", { ascending: false })
-    .limit(1);
-  if (error || !data || data.length === 0) return null;
-  return `📊 Kuota ${kode} ${data[0].tahun_ajaran}: ${data[0].jumlah} siswa.`;
-}
-
-async function getBiayaAll() {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("biaya_ppdb")
-    .select("jenjang_kode, tahun_ajaran, formulir, spp, uang_pangkal, seragam, kegiatan")
-    .order("jenjang_kode", { ascending: true });
-  if (error || !data || data.length === 0) return null;
-
-  const tahun = data[0].tahun_ajaran;
-  let lines = data.map(b =>
-    `\n📌 ${b.jenjang_kode}:\n` +
-    `• Formulir: Rp ${b.formulir.toLocaleString()}\n` +
-    `• Uang Pangkal: Rp ${b.uang_pangkal.toLocaleString()}\n` +
-    `• SPP: Rp ${b.spp.toLocaleString()}/bulan\n` +
-    `• Seragam: Rp ${b.seragam.toLocaleString()}\n` +
-    `• Kegiatan: Rp ${b.kegiatan.toLocaleString()}`
-  ).join("\n");
-  return `💰 Biaya PPDB ${tahun}:${lines}`;
-}
-
-async function getBiayaByJenjang(kode) {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from("biaya_ppdb")
-    .select("tahun_ajaran, formulir, spp, uang_pangkal, seragam, kegiatan")
-    .eq("jenjang_kode", kode)
-    .order("updated_at", { ascending: false })
-    .limit(1);
-  if (error || !data || data.length === 0) return null;
-
-  const b = data[0];
-  return `💰 Biaya ${kode} ${b.tahun_ajaran}:\n` +
-         `• Formulir: Rp ${b.formulir.toLocaleString()}\n` +
-         `• Uang Pangkal: Rp ${b.uang_pangkal.toLocaleString()}\n` +
-         `• SPP: Rp ${b.spp.toLocaleString()}/bulan\n` +
-         `• Seragam: Rp ${b.seragam.toLocaleString()}\n` +
-         `• Kegiatan: Rp ${b.kegiatan.toLocaleString()}`;
-}
-
+// Mengambil FAQ
 async function getFaq(keyword, subkey = null) {
   if (!supabase) return null;
   let query = supabase.from("faq").select("konten").eq("keyword", keyword);
@@ -132,7 +65,7 @@ const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉
 2️⃣ *BIAYA* → Info biaya per jenjang  
 3️⃣ *SYARAT* → Persyaratan pendaftaran  
 4️⃣ *JADWAL* → Jadwal PPDB terbaru  
-5️⃣ *DAFTAR* → Daftar langsung dari WhatsApp  
+5️⃣ *DAFTAR* → Daftar sekarang  
 6️⃣ *KONTAK* → Hubungi admin  
 7️⃣ *BEASISWA* → Info beasiswa  
 
@@ -143,6 +76,8 @@ const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉
 // 🚀 Start Bot
 // =====================================
 let latestQrData = null;
+const sessions = {}; // Menyimpan state pendaftaran sementara per nomor
+
 async function startBot() {
   const authDir = path.join(__dirname, "auth_info");
   if (!fs.existsSync(authDir)) fs.mkdirSync(authDir);
@@ -176,24 +111,21 @@ async function startBot() {
     }
   });
 
-  // =====================================
-  // 📝 Pesan masuk
-  // =====================================
+  // 📩 Listener pesan
   sock.ev.on("messages.upsert", async (m) => {
     try {
       const msg = m.messages[0];
       if (!msg.message) return;
       if (msg.key.fromMe) return;
       const from = msg.key.remoteJid;
-      if (from.endsWith("@g.us")) return;
+      if (from.endsWith("@g.us")) return; // skip grup
 
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
 
+      // ✅ Simpan/update user WA
       if (supabase) {
-        await supabase
-          .from("users_wa")
-          .upsert({ nomor, nama }, { onConflict: "nomor" });
+        await supabase.from("users_wa").upsert({ nomor, nama }, { onConflict: "nomor" });
       }
 
       const text = (
@@ -202,77 +134,87 @@ async function startBot() {
         msg.message.imageMessage?.caption ||
         ""
       ).trim();
-      if (!text) return;
 
-      const lower = text.toLowerCase();
-
-      // ===== MENU =====
+      // Handle menu/help
+      const lower = (text || "").toLowerCase();
       if (["menu", "help", "start", "mulai"].includes(lower)) {
+        sessions[nomor] = null; // reset session
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      // ===== KUOTA =====
-      if (lower.includes("kuota")) {
-        const jenjang = parseJenjang(text);
-        const resp = jenjang
-          ? await getKuotaByJenjang(jenjang)
-          : await getAllKuota();
-        return sock.sendMessage(from, { text: withFooter(resp || "❌ Data kuota tidak tersedia.") });
-      }
-
-      // ===== BIAYA =====
-      if (lower.includes("biaya")) {
-        const jenjang = parseJenjang(text);
-        const resp = jenjang
-          ? await getBiayaByJenjang(jenjang)
-          : await getBiayaAll();
-        return sock.sendMessage(from, { text: withFooter(resp || "❌ Data biaya tidak tersedia.") });
-      }
-
-      // ===== SYARAT =====
-      if (lower.includes("syarat")) {
-        const jenjang = parseJenjang(text);
-        const resp = await getFaq("syarat", jenjang);
-        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info syarat belum ada.") });
-      }
-
-      // ===== DAFTAR INTERAKTIF =====
-      if (lower.includes("daftar")) {
-        const jenjang = parseJenjang(text);
-        if (!jenjang) return sock.sendMessage(from, { text: "❌ Mohon sebutkan jenjang: TK, SD, SMP, SMA.\nContoh: DAFTAR SD" });
-
-        await sock.sendMessage(from, { text: `📝 Pendaftaran ${jenjang}\nSilakan kirim data dalam format:\n\nNama Lengkap | Tanggal Lahir | KK | Akta Lahir${jenjang === "SMP" || jenjang === "SMA" ? " | Rapor Terakhir" : ""}` });
-
-        if (!global.pendingRegistrations) global.pendingRegistrations = {};
-        global.pendingRegistrations[nomor] = { jenjang };
-        return;
-      }
-
-      // ===== HANDLE DATA PENDAFTARAN =====
-      if (global.pendingRegistrations && global.pendingRegistrations[nomor]) {
-        const dataArr = text.split("|").map(d => d.trim());
-        const { jenjang } = global.pendingRegistrations[nomor];
-
-        let valid = false;
-        if (jenjang === "TK" || jenjang === "SD") valid = dataArr.length === 4;
-        if (jenjang === "SMP" || jenjang === "SMA") valid = dataArr.length === 5;
-
-        if (!valid) return sock.sendMessage(from, { text: "❌ Format data salah, silakan coba lagi sesuai instruksi." });
-
-        const [namaLengkap, ttl, kk, akta, rapor] = dataArr;
-        const payload = { nomor, jenjang, nama: namaLengkap, ttl, kk, akta, rapor: rapor || null, created_at: new Date().toISOString() };
-        const { error } = await supabase.from("pendaftaran_ppdb").insert(payload);
-        if (error) return sock.sendMessage(from, { text: "❌ Gagal mendaftar. Silakan coba lagi." });
-
-        delete global.pendingRegistrations[nomor];
-        return sock.sendMessage(from, { text: `✅ Pendaftaran ${jenjang} berhasil!\nTerima kasih ${namaLengkap}.` });
-      }
-
-      // ===== FAQ / INFO LAIN =====
-      if (["jadwal", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
-        const key = ["jadwal", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
+      // Handle FAQ
+      if (["syarat", "jadwal", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
+        const key = ["syarat", "jadwal", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
         const resp = await getFaq(key);
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
+      }
+
+      // Handle DAFTAR (pendaftaran step-by-step)
+      if (lower.includes("daftar") || sessions[nomor]) {
+        if (!sessions[nomor]) {
+          sessions[nomor] = { step: 1, data: {} };
+          return sock.sendMessage(from, { text: "📝 Pendaftaran PPDB\n\nLangkah 1: Masukkan *Nama Lengkap* siswa:" });
+        }
+
+        const session = sessions[nomor];
+
+        switch (session.step) {
+          case 1:
+            session.data.nama_siswa = text;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 2: Masukkan *Tanggal Lahir* (YYYY-MM-DD):" });
+
+          case 2:
+            session.data.tgl_lahir = text;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 3: Masukkan *Jenjang* (TK/SD/SMP/SMA):" });
+
+          case 3:
+            const jenjang = parseJenjang(text);
+            if (!jenjang) return sock.sendMessage(from, { text: "❌ Jenjang tidak valid, masukkan TK/SD/SMP/SMA:" });
+            session.data.jenjang = jenjang;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 4: Masukkan *Nomor KK*:" });
+
+          case 4:
+            session.data.nomor_kk = text;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 5: Silahkan kirim *foto KK* (gambar):" });
+
+          case 5:
+            if (msg.message.imageMessage) {
+              // Download image
+              const stream = await downloadContentFromMessage(msg.message.imageMessage, "buffer");
+              const filePath = path.join(__dirname, "uploads", `${nomor}_kk.jpg`);
+              if (!fs.existsSync(path.join(__dirname, "uploads"))) fs.mkdirSync(path.join(__dirname, "uploads"));
+              const buffers = [];
+              for await (const chunk of stream) buffers.push(chunk);
+              fs.writeFileSync(filePath, Buffer.concat(buffers));
+              session.data.foto_kk = filePath;
+
+              // Simpan ke Supabase
+              if (supabase) {
+                await supabase.from("pendaftaran_ppdb").insert([{
+                  nomor,
+                  nama_siswa: session.data.nama_siswa,
+                  tgl_lahir: session.data.tgl_lahir,
+                  jenjang: session.data.jenjang,
+                  nomor_kk: session.data.nomor_kk,
+                  foto_kk: session.data.foto_kk,
+                  created_at: new Date().toISOString(),
+                }]);
+              }
+
+              sessions[nomor] = null;
+              return sock.sendMessage(from, { text: "✅ Pendaftaran berhasil! Terima kasih." });
+            } else {
+              return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
+            }
+
+          default:
+            sessions[nomor] = null;
+            return sock.sendMessage(from, { text: HELP_TEXT });
+        }
       }
 
       // fallback
@@ -294,9 +236,7 @@ startBot().catch(err => console.error("startBot error", err));
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.get("/", (req, res) =>
-  res.send("✅ Bot WhatsApp PPDB aktif...")
-);
+app.get("/", (req, res) => res.send("✅ Bot WhatsApp PPDB aktif..."));
 
 app.get("/qr", async (req, res) => {
   if (!latestQrData) return res.send("⚠️ QR belum tersedia / sudah discan.");
@@ -304,6 +244,4 @@ app.get("/qr", async (req, res) => {
   res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
 });
 
-app.listen(port, () =>
-  console.log(`🌍 Web server berjalan di port ${port}`)
-);
+app.listen(port, () => console.log(`🌍 Web server berjalan di port ${port}`));
