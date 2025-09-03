@@ -17,7 +17,7 @@ const { createClient } = require("@supabase/supabase-js");
 const log = P({ level: "info" });
 
 // =====================================
-// 🚀 Supabase
+// Supabase
 // =====================================
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -25,7 +25,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // =====================================
-// 🔎 Utility Functions
+// Utility Functions
 // =====================================
 function parseJenjang(text) {
   const t = (text || "").toUpperCase();
@@ -51,7 +51,7 @@ async function getFaq(keyword, subkey = null) {
 }
 
 // =====================================
-// 📌 HELP Text
+// Help Text
 // =====================================
 const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉  
 
@@ -69,10 +69,10 @@ const HELP_TEXT = `⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉
 `;
 
 // =====================================
-// 🚀 Start Bot
+// Start Bot
 // =====================================
 let latestQrData = null;
-const sessions = {}; // Menyimpan state pendaftaran sementara per nomor
+const sessions = {};
 
 async function startBot() {
   const authDir = path.join(__dirname, "auth_info");
@@ -107,7 +107,7 @@ async function startBot() {
     }
   });
 
-  // 📩 Listener pesan
+  // Listener pesan
   sock.ev.on("messages.upsert", async (m) => {
     try {
       const msg = m.messages[0];
@@ -119,7 +119,7 @@ async function startBot() {
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
 
-      // ✅ Simpan/update user WA
+      // Simpan/update user WA
       await supabase.from("users_wa").upsert({ nomor, nama }, { onConflict: "nomor" });
 
       const text = (
@@ -129,21 +129,22 @@ async function startBot() {
         ""
       ).trim();
 
-      // Handle menu/help
       const lower = text.toLowerCase();
+
+      // Menu/help
       if (["menu", "help", "start", "mulai"].includes(lower)) {
         sessions[nomor] = null;
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      // Handle FAQ
+      // FAQ
       if (["syarat", "jadwal", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
         const key = ["syarat", "jadwal", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
         const resp = await getFaq(key);
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
 
-      // Handle DAFTAR
+      // DAFTAR
       if (lower.includes("daftar") || sessions[nomor]) {
         if (!sessions[nomor]) {
           sessions[nomor] = { step: 1, data: {} };
@@ -173,28 +174,23 @@ async function startBot() {
           case 4:
             session.data.nomor_kk = text;
             session.step++;
-            return sock.sendMessage(from, { text: "Langkah 5: Kirim *foto KK* (gambar):" });
+            return sock.sendMessage(from, { text: "Langkah 5: Kirim *Foto KK* (gambar):" });
 
           case 5:
             if (msg.message.imageMessage) {
               session.data.kk_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/kk`);
-              if (["SMP", "SMA"].includes(session.data.jenjang_kode)) {
-                session.step++;
-                return sock.sendMessage(from, { text: "Langkah 6: Kirim *foto Rapor* (gambar):" });
-              } else {
-                session.step = 8;
-                return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Peserta* (gambar):" });
-              }
+              session.step = ["SMP", "SMA"].includes(session.data.jenjang_kode) ? 6 : 8;
+              return sock.sendMessage(from, { text: ["SMP", "SMA"].includes(session.data.jenjang_kode) ? "Langkah 6: Kirim *foto Rapor* (gambar):" : "Langkah 7: Kirim *Foto Peserta* (gambar):" });
             } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
 
-          case 6: // Rapor SMP/SMA
+          case 6:
             if (msg.message.imageMessage) {
               session.data.rapor_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/rapor`);
               session.step++;
               return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
             } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Rapor*." });
 
-          case 7: // Ijazah SMP/SMA
+          case 7:
             if (msg.message.imageMessage) {
               session.data.ijazah_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/ijazah`);
               session.step++;
@@ -205,7 +201,6 @@ async function startBot() {
             if (msg.message.imageMessage) {
               session.data.foto_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/foto`);
 
-              // Insert ke Supabase table
               await supabase.from("pendaftaran_ppdb").insert([{
                 nomor,
                 nama: session.data.nama_siswa,
@@ -237,9 +232,7 @@ async function startBot() {
   return sock;
 }
 
-// =====================================
 // Upload ke Supabase Storage
-// =====================================
 async function uploadToSupabaseStorage(imageMessage, fileName) {
   const stream = await downloadContentFromMessage(imageMessage, "buffer");
   const buffers = [];
@@ -255,9 +248,7 @@ async function uploadToSupabaseStorage(imageMessage, fileName) {
   return publicUrl;
 }
 
-// =====================================
 // Start bot & web server
-// =====================================
 startBot().catch(err => console.error("startBot error", err));
 
 const app = express();
