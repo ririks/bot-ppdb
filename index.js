@@ -21,7 +21,6 @@ const log = P({ level: "info" });
 // =====================================
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // =====================================
@@ -107,30 +106,31 @@ async function startBot() {
     }
   });
 
-  // Listener pesan
+  // =====================================
+  // Listener Pesan
+  // =====================================
   sock.ev.on("messages.upsert", async (m) => {
     try {
       const msg = m.messages[0];
       if (!msg.message) return;
       if (msg.key.fromMe) return;
+
       const from = msg.key.remoteJid;
-      if (from.endsWith("@g.us")) return;
+      if (from.endsWith("@g.us")) return; // abaikan grup
 
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
 
-      // Simpan/update user WA
+      // Simpan / update user WA
       await supabase.from("users_wa").upsert({ nomor, nama }, { onConflict: "nomor" });
 
       const isImage = !!msg.message.imageMessage;
-
       const text = (
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
         msg.message.imageMessage?.caption ||
         ""
       ).trim();
-
       const lower = text.toLowerCase();
 
       // Menu/help
@@ -206,9 +206,7 @@ async function startBot() {
               await supabase.from("pendaftaran_ppdb").insert([{
                 nomor,
                 nama: session.data.nama_siswa,
-                tgl_lahir: session.data.tgl_lahir,
                 jenjang_kode: session.data.jenjang_kode,
-                nomor_kk: session.data.nomor_kk,
                 kk_url: session.data.kk_url,
                 rapor_url: session.data.rapor_url || null,
                 ijazah_url: session.data.ijazah_url || null,
@@ -236,9 +234,11 @@ async function startBot() {
   return sock;
 }
 
+// =====================================
 // Upload ke Supabase Storage
+// =====================================
 async function uploadToSupabaseStorage(imageMessage, fileName) {
-  const stream = await downloadContentFromMessage(imageMessage, "buffer");
+  const stream = await downloadContentFromMessage(imageMessage, "image");
   const buffers = [];
   for await (const chunk of stream) buffers.push(chunk);
   const buffer = Buffer.concat(buffers);
@@ -252,7 +252,9 @@ async function uploadToSupabaseStorage(imageMessage, fileName) {
   return publicUrl;
 }
 
+// =====================================
 // Start bot & web server
+// =====================================
 startBot().catch(err => console.error("startBot error", err));
 
 const app = express();
