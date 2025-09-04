@@ -106,130 +106,171 @@ async function startBot() {
     }
   });
 
-  // =====================================
-  // Listener Pesan
-  // =====================================
-  sock.ev.on("messages.upsert", async (m) => {
-    try {
-      const msg = m.messages[0];
-      if (!msg.message) return;
-      if (msg.key.fromMe) return;
+ // =====================================
+// Helper ambil isi pesan WA
+// =====================================
+function extractMessage(msg) {
+  if (!msg.message) return null;
 
-      const from = msg.key.remoteJid;
-      if (from.endsWith("@g.us")) return; // abaikan grup
+  if (msg.message.imageMessage) return { type: "image", data: msg.message.imageMessage };
+  if (msg.message.videoMessage) return { type: "video", data: msg.message.videoMessage };
+  if (msg.message.documentMessage) return { type: "document", data: msg.message.documentMessage };
 
-      const nama = msg.pushName || "Tanpa Nama";
-      const nomor = from.replace("@s.whatsapp.net", "");
+  // WA sering kirim gambar sebagai viewOnce
+  if (msg.message.viewOnceMessage?.message) {
+    return extractMessage({ message: msg.message.viewOnceMessage.message });
+  }
 
-      // Simpan / update user WA
-      await supabase.from("users_wa").upsert({ nomor, nama }, { onConflict: "nomor" });
+  if (msg.message.conversation) return { type: "text", data: msg.message.conversation };
+  if (msg.message.extendedTextMessage) return { type: "text", data: msg.message.extendedTextMessage.text };
 
-      const isImage = !!msg.message.imageMessage;
-      const text = (
-        msg.message.conversation ||
-        msg.message.extendedTextMessage?.text ||
-        msg.message.imageMessage?.caption ||
-        ""
-      ).trim();
-      const lower = text.toLowerCase();
+  return null;
+}
 
-      // Menu/help
-      if (["menu", "help", "start", "mulai"].includes(lower)) {
-        sessions[nomor] = null;
-        return sock.sendMessage(from, { text: HELP_TEXT });
-      }
+// =====================================
+// Listener Pesan
+// =====================================
+sock.ev.on("messages.upsert", async (m) => {
+  try {
+    const msg = m.messages[0];
+    if (!msg.message) return;
+    if (msg.key.fromMe) return;
 
-      // FAQ
-      if (["syarat", "jadwal", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
-        const key = ["syarat", "jadwal", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
-        const resp = await getFaq(key);
-        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
-      }
+    const from = msg.key.remoteJid;
+    if (from.endsWith("@g.us")) return; // abaikan grup
 
-      // DAFTAR
-      if (lower.includes("daftar") || sessions[nomor]) {
-        if (!sessions[nomor]) {
-          sessions[nomor] = { step: 1, data: {} };
-          return sock.sendMessage(from, { text: "📝 Pendaftaran PPDB\n\nLangkah 1: Masukkan *Nama Lengkap* siswa:" });
-        }
+    const nama = msg.pushName || "Tanpa Nama";
+    const nomor = from.replace("@s.whatsapp.net", "");
 
-        const session = sessions[nomor];
+    // simpan / update user WA ke tabel users_wa
+    await supabase.from("users_wa").upsert(
+      { nomor, nama },
+      { onConflict: "nomor" }
+    );
 
-        switch (session.step) {
-          case 1:
-            session.data.nama_siswa = text;
-            session.step++;
-            return sock.sendMessage(from, { text: "Langkah 2: Masukkan *Tanggal Lahir* (YYYY-MM-DD):" });
+    // ambil isi pesan
+    const content = extractMessage(msg);
+    if (!content) return;
 
-          case 2:
-            session.data.tgl_lahir = text;
-            session.step++;
-            return sock.sendMessage(from, { text: "Langkah 3: Masukkan *Jenjang* (TK/SD/SMP/SMA):" });
+    const isImage = content.type === "image";
+    const text = content.type === "text" ? content.data.trim() : "";
+    const lower = text.toLowerCase();
 
-          case 3:
-            const jenjang = parseJenjang(text);
-            if (!jenjang) return sock.sendMessage(from, { text: "❌ Jenjang tidak valid, masukkan TK/SD/SMP/SMA:" });
-            session.data.jenjang_kode = jenjang;
-            session.step++;
-            return sock.sendMessage(from, { text: "Langkah 4: Masukkan *Nomor KK*:" });
-
-          case 4:
-            session.data.nomor_kk = text;
-            session.step++;
-            return sock.sendMessage(from, { text: "Langkah 5: Kirim *Foto KK* (gambar):" });
-
-          case 5:
-            if (isImage) {
-              session.data.kk_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/kk`);
-              session.step = ["SMP", "SMA"].includes(session.data.jenjang_kode) ? 6 : 8;
-              return sock.sendMessage(from, { text: ["SMP", "SMA"].includes(session.data.jenjang_kode) ? "Langkah 6: Kirim *foto Rapor* (gambar):" : "Langkah 7: Kirim *Foto Peserta* (gambar):" });
-            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
-
-          case 6:
-            if (isImage) {
-              session.data.rapor_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/rapor`);
-              session.step++;
-              return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
-            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Rapor*." });
-
-          case 7:
-            if (isImage) {
-              session.data.ijazah_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/ijazah`);
-              session.step++;
-              return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
-            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Ijazah*." });
-
-          case 8:
-            if (isImage) {
-              session.data.foto_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/foto`);
-
-              await supabase.from("pendaftaran_ppdb").insert([{
-                nomor,
-                nama: session.data.nama_siswa,
-                jenjang_kode: session.data.jenjang_kode,
-                kk_url: session.data.kk_url,
-                rapor_url: session.data.rapor_url || null,
-                ijazah_url: session.data.ijazah_url || null,
-                foto_url: session.data.foto_url,
-                status: "pending",
-                created_at: new Date().toISOString(),
-              }]);
-
-              sessions[nomor] = null;
-              return sock.sendMessage(from, { text: "✅ Pendaftaran berhasil! Terima kasih." });
-            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *Foto Peserta*." });
-
-          default:
-            sessions[nomor] = null;
-            return sock.sendMessage(from, { text: HELP_TEXT });
-        }
-      }
-
+    // reset ke menu
+    if (["menu", "help", "start", "mulai"].includes(lower)) {
+      sessions[nomor] = null;
       return sock.sendMessage(from, { text: HELP_TEXT });
-    } catch (err) {
-      console.error("messages.upsert error", err);
     }
-  });
+
+    // FAQ
+    if (["syarat", "jadwal", "kontak", "alamat", "beasiswa"].some(k => lower.includes(k))) {
+      const key = ["syarat", "jadwal", "kontak", "alamat", "beasiswa"].find(k => lower.includes(k));
+      const resp = await getFaq(key);
+      return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
+    }
+
+    // DAFTAR
+    if (lower.includes("daftar") || sessions[nomor]) {
+      if (!sessions[nomor]) {
+        sessions[nomor] = { step: 1, data: {} };
+        return sock.sendMessage(from, {
+          text: "📝 Pendaftaran PPDB\n\nLangkah 1: Masukkan *Nama Lengkap* siswa:"
+        });
+      }
+
+      const session = sessions[nomor];
+
+      switch (session.step) {
+        case 1:
+          session.data.nama_siswa = text;
+          session.step++;
+          return sock.sendMessage(from, { text: "Langkah 2: Masukkan *Tanggal Lahir* (YYYY-MM-DD):" });
+
+        case 2:
+          session.data.tgl_lahir = text;
+          session.step++;
+          return sock.sendMessage(from, { text: "Langkah 3: Masukkan *Jenjang* (TK/SD/SMP/SMA):" });
+
+        case 3:
+          const jenjang = parseJenjang(text);
+          if (!jenjang)
+            return sock.sendMessage(from, { text: "❌ Jenjang tidak valid, masukkan TK/SD/SMP/SMA:" });
+          session.data.jenjang_kode = jenjang;
+          session.step++;
+          return sock.sendMessage(from, { text: "Langkah 4: Masukkan *Nomor KK*:" });
+
+        case 4:
+          session.data.nomor_kk = text;
+          session.step++;
+          return sock.sendMessage(from, { text: "Langkah 5: Kirim *Foto KK* (gambar):" });
+
+        case 5:
+          if (isImage) {
+            session.data.kk_url = await uploadToSupabaseStorage(content.data, `${nomor}/kk`);
+            session.step = ["SMP", "SMA"].includes(session.data.jenjang_kode) ? 6 : 8;
+            return sock.sendMessage(from, {
+              text: ["SMP", "SMA"].includes(session.data.jenjang_kode)
+                ? "Langkah 6: Kirim *foto Rapor* (gambar):"
+                : "Langkah 7: Kirim *Foto Peserta* (gambar):"
+            });
+          } else {
+            return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
+          }
+
+        case 6:
+          if (isImage) {
+            session.data.rapor_url = await uploadToSupabaseStorage(content.data, `${nomor}/rapor`);
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
+          } else {
+            return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Rapor*." });
+          }
+
+        case 7:
+          if (isImage) {
+            session.data.ijazah_url = await uploadToSupabaseStorage(content.data, `${nomor}/ijazah`);
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
+          } else {
+            return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Ijazah*." });
+          }
+
+        case 8:
+          if (isImage) {
+            session.data.foto_url = await uploadToSupabaseStorage(content.data, `${nomor}/foto`);
+
+            // simpan ke database
+            await supabase.from("pendaftaran_ppdb").insert([{
+              nomor,
+              nama: session.data.nama_siswa,
+              jenjang_kode: session.data.jenjang_kode,
+              kk_url: session.data.kk_url,
+              rapor_url: session.data.rapor_url || null,
+              ijazah_url: session.data.ijazah_url || null,
+              foto_url: session.data.foto_url,
+              status: "pending",
+              created_at: new Date().toISOString(),
+            }]);
+
+            sessions[nomor] = null;
+            return sock.sendMessage(from, { text: "✅ Pendaftaran berhasil! Terima kasih." });
+          } else {
+            return sock.sendMessage(from, { text: "❌ Tolong kirim *Foto Peserta*." });
+          }
+
+        default:
+          sessions[nomor] = null;
+          return sock.sendMessage(from, { text: HELP_TEXT });
+      }
+    }
+
+    // fallback ke menu
+    return sock.sendMessage(from, { text: HELP_TEXT });
+  } catch (err) {
+    console.error("messages.upsert error", err);
+  }
+});
+
 
   return sock;
 }
