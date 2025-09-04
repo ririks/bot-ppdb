@@ -122,6 +122,8 @@ async function startBot() {
       // Simpan/update user WA
       await supabase.from("users_wa").upsert({ nomor, nama }, { onConflict: "nomor" });
 
+      const isImage = !!msg.message.imageMessage;
+
       const text = (
         msg.message.conversation ||
         msg.message.extendedTextMessage?.text ||
@@ -145,94 +147,85 @@ async function startBot() {
       }
 
       // DAFTAR
-if (lower.includes("daftar") || sessions[nomor]) {
-  if (!sessions[nomor]) {
-    sessions[nomor] = { step: 1, data: {} };
-    return sock.sendMessage(from, { text: "📝 Pendaftaran PPDB\n\nLangkah 1: Masukkan *Nama Lengkap* siswa:" });
-  }
+      if (lower.includes("daftar") || sessions[nomor]) {
+        if (!sessions[nomor]) {
+          sessions[nomor] = { step: 1, data: {} };
+          return sock.sendMessage(from, { text: "📝 Pendaftaran PPDB\n\nLangkah 1: Masukkan *Nama Lengkap* siswa:" });
+        }
 
-  const session = sessions[nomor];
+        const session = sessions[nomor];
 
-  const sendNextStep = async () => {
-    switch (session.step) {
-      case 6:
-        session.step++;
-        return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
-      case 7:
-        session.step++;
-        return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
-      case 8:
-        // Insert ke Supabase
-        await supabase.from("pendaftaran_ppdb").insert([{
-          nomor,
-          nama: session.data.nama_siswa,
-          jenjang_kode: session.data.jenjang_kode,
-          kk_url: session.data.kk_url,
-          rapor_url: session.data.rapor_url || null,
-          ijazah_url: session.data.ijazah_url || null,
-          foto_url: session.data.foto_url,
-          status: "pending",
-          created_at: new Date().toISOString(),
-        }]);
-        sessions[nomor] = null;
-        return sock.sendMessage(from, { text: "✅ Pendaftaran berhasil! Terima kasih." });
-    }
-  };
+        switch (session.step) {
+          case 1:
+            session.data.nama_siswa = text;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 2: Masukkan *Tanggal Lahir* (YYYY-MM-DD):" });
 
-  const handleImageStep = async (key, nextStepText) => {
-    if (msg.message.imageMessage) {
-      session.data[key] = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/${key}`);
-      await sendNextStep();
-    } else {
-      return sock.sendMessage(from, { text: `❌ Tolong kirim *${nextStepText}*.` });
-    }
-  };
+          case 2:
+            session.data.tgl_lahir = text;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 3: Masukkan *Jenjang* (TK/SD/SMP/SMA):" });
 
-  switch (session.step) {
-    case 1:
-      session.data.nama_siswa = text;
-      session.step++;
-      return sock.sendMessage(from, { text: "Langkah 2: Masukkan *Tanggal Lahir* (YYYY-MM-DD):" });
+          case 3:
+            const jenjang = parseJenjang(text);
+            if (!jenjang) return sock.sendMessage(from, { text: "❌ Jenjang tidak valid, masukkan TK/SD/SMP/SMA:" });
+            session.data.jenjang_kode = jenjang;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 4: Masukkan *Nomor KK*:" });
 
-    case 2:
-      session.data.tgl_lahir = text;
-      session.step++;
-      return sock.sendMessage(from, { text: "Langkah 3: Masukkan *Jenjang* (TK/SD/SMP/SMA):" });
+          case 4:
+            session.data.nomor_kk = text;
+            session.step++;
+            return sock.sendMessage(from, { text: "Langkah 5: Kirim *Foto KK* (gambar):" });
 
-    case 3:
-      const jenjang = parseJenjang(text);
-      if (!jenjang) return sock.sendMessage(from, { text: "❌ Jenjang tidak valid, masukkan TK/SD/SMP/SMA:" });
-      session.data.jenjang_kode = jenjang;
-      session.step++;
-      return sock.sendMessage(from, { text: "Langkah 4: Masukkan *Nomor KK*:" });
+          case 5:
+            if (isImage) {
+              session.data.kk_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/kk`);
+              session.step = ["SMP", "SMA"].includes(session.data.jenjang_kode) ? 6 : 8;
+              return sock.sendMessage(from, { text: ["SMP", "SMA"].includes(session.data.jenjang_kode) ? "Langkah 6: Kirim *foto Rapor* (gambar):" : "Langkah 7: Kirim *Foto Peserta* (gambar):" });
+            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar KK*." });
 
-    case 4:
-      session.data.nomor_kk = text;
-      session.step++;
-      return sock.sendMessage(from, { text: "Langkah 5: Kirim *Foto KK* (gambar):" });
+          case 6:
+            if (isImage) {
+              session.data.rapor_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/rapor`);
+              session.step++;
+              return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
+            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Rapor*." });
 
-    case 5:
-      return handleImageStep("kk_url", "gambar KK");
+          case 7:
+            if (isImage) {
+              session.data.ijazah_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/ijazah`);
+              session.step++;
+              return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
+            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *gambar Ijazah*." });
 
-    case 6:
-      if (["SMP", "SMA"].includes(session.data.jenjang_kode)) {
-        return handleImageStep("rapor_url", "gambar Rapor");
-      } else {
-        session.step = 8; // langsung ke foto peserta untuk TK/SD
-        return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Peserta* (gambar):" });
+          case 8:
+            if (isImage) {
+              session.data.foto_url = await uploadToSupabaseStorage(msg.message.imageMessage, `${nomor}/foto`);
+
+              await supabase.from("pendaftaran_ppdb").insert([{
+                nomor,
+                nama: session.data.nama_siswa,
+                tgl_lahir: session.data.tgl_lahir,
+                jenjang_kode: session.data.jenjang_kode,
+                nomor_kk: session.data.nomor_kk,
+                kk_url: session.data.kk_url,
+                rapor_url: session.data.rapor_url || null,
+                ijazah_url: session.data.ijazah_url || null,
+                foto_url: session.data.foto_url,
+                status: "pending",
+                created_at: new Date().toISOString(),
+              }]);
+
+              sessions[nomor] = null;
+              return sock.sendMessage(from, { text: "✅ Pendaftaran berhasil! Terima kasih." });
+            } else return sock.sendMessage(from, { text: "❌ Tolong kirim *Foto Peserta*." });
+
+          default:
+            sessions[nomor] = null;
+            return sock.sendMessage(from, { text: HELP_TEXT });
+        }
       }
-
-    case 7:
-      return handleImageStep("ijazah_url", "gambar Ijazah");
-
-    case 8:
-      return handleImageStep("foto_url", "Foto Peserta");
-
-    default:
-      sessions[nomor] = null;
-      return sock.sendMessage(from, { text: HELP_TEXT });
-  }
-}
 
       return sock.sendMessage(from, { text: HELP_TEXT });
     } catch (err) {
