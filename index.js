@@ -107,7 +107,7 @@ async function startBot() {
   });
 
   // =====================================
-  // Helper ambil isi pesan WA (rekursif)
+  // Helper ambil isi pesan WA
   // =====================================
   function extractMessage(msg) {
     if (!msg.message) return null;
@@ -117,15 +117,17 @@ async function startBot() {
       return extractMessage({ message: msg.message.ephemeralMessage.message });
     }
 
-    // wrapper viewOnce
+    // wrapper view once
     if (msg.message.viewOnceMessage?.message) {
       return extractMessage({ message: msg.message.viewOnceMessage.message });
     }
 
+    // media
     if (msg.message.imageMessage) return { type: "image", data: msg.message.imageMessage };
     if (msg.message.videoMessage) return { type: "video", data: msg.message.videoMessage };
     if (msg.message.documentMessage) return { type: "document", data: msg.message.documentMessage };
 
+    // teks
     if (msg.message.conversation) return { type: "text", data: msg.message.conversation };
     if (msg.message.extendedTextMessage) return { type: "text", data: msg.message.extendedTextMessage.text };
 
@@ -146,10 +148,6 @@ async function startBot() {
 
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
-
-      // DEBUG: lihat isi raw message
-      console.log("=== RAW MESSAGE ===");
-      console.dir(msg.message, { depth: 5 });
 
       // simpan / update user WA ke tabel users_wa
       await supabase.from("users_wa").upsert(
@@ -215,7 +213,7 @@ async function startBot() {
 
           case 5:
             if (isImage) {
-              session.data.kk_url = await uploadToSupabaseStorage(content.data, `${nomor}/kk`);
+              session.data.kk_url = await uploadToSupabaseStorage(content.data, `${nomor}/kk`, "image");
               session.step = ["SMP", "SMA"].includes(session.data.jenjang_kode) ? 6 : 8;
               return sock.sendMessage(from, {
                 text: ["SMP", "SMA"].includes(session.data.jenjang_kode)
@@ -228,7 +226,7 @@ async function startBot() {
 
           case 6:
             if (isImage) {
-              session.data.rapor_url = await uploadToSupabaseStorage(content.data, `${nomor}/rapor`);
+              session.data.rapor_url = await uploadToSupabaseStorage(content.data, `${nomor}/rapor`, "image");
               session.step++;
               return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
             } else {
@@ -237,7 +235,7 @@ async function startBot() {
 
           case 7:
             if (isImage) {
-              session.data.ijazah_url = await uploadToSupabaseStorage(content.data, `${nomor}/ijazah`);
+              session.data.ijazah_url = await uploadToSupabaseStorage(content.data, `${nomor}/ijazah`, "image");
               session.step++;
               return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
             } else {
@@ -246,7 +244,7 @@ async function startBot() {
 
           case 8:
             if (isImage) {
-              session.data.foto_url = await uploadToSupabaseStorage(content.data, `${nomor}/foto`);
+              session.data.foto_url = await uploadToSupabaseStorage(content.data, `${nomor}/foto`, "image");
 
               // simpan ke database
               await supabase.from("pendaftaran_ppdb").insert([{
@@ -286,15 +284,17 @@ async function startBot() {
 // =====================================
 // Upload ke Supabase Storage
 // =====================================
-async function uploadToSupabaseStorage(imageMessage, fileName) {
-  const stream = await downloadContentFromMessage(imageMessage, "image");
+async function uploadToSupabaseStorage(messageContent, fileName, type = "image") {
+  const stream = await downloadContentFromMessage(messageContent, type);
   const buffers = [];
   for await (const chunk of stream) buffers.push(chunk);
   const buffer = Buffer.concat(buffers);
 
+  const ext = type === "video" ? "mp4" : type === "document" ? "pdf" : "jpg";
+
   const { data, error } = await supabase.storage
     .from("ppdb-files")
-    .upload(`${fileName}_${Date.now()}.jpg`, buffer, { upsert: true });
+    .upload(`${fileName}_${Date.now()}.${ext}`, buffer, { upsert: true });
 
   if (error) throw error;
   const { publicUrl } = supabase.storage.from("ppdb-files").getPublicUrl(data.path);
