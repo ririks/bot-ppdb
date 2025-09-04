@@ -125,7 +125,11 @@ async function startBot() {
     // media
     if (msg.message.imageMessage) return { type: "image", data: msg.message.imageMessage };
     if (msg.message.videoMessage) return { type: "video", data: msg.message.videoMessage };
-    if (msg.message.documentMessage) return { type: "document", data: msg.message.documentMessage };
+    if (msg.message.documentMessage) {
+      const mime = msg.message.documentMessage.mimetype || "";
+      if (mime.startsWith("image/")) return { type: "image", data: msg.message.documentMessage };
+      return { type: "document", data: msg.message.documentMessage };
+    }
 
     // teks
     if (msg.message.conversation) return { type: "text", data: msg.message.conversation };
@@ -158,6 +162,8 @@ async function startBot() {
       // ambil isi pesan
       const content = extractMessage(msg);
       if (!content) return;
+
+      console.log("📩 Pesan masuk:", content.type);
 
       const isImage = content.type === "image";
       const text = content.type === "text" ? content.data.trim() : "";
@@ -213,7 +219,7 @@ async function startBot() {
 
           case 5:
             if (isImage) {
-              session.data.kk_url = await uploadToSupabaseStorage(content.data, `${nomor}/kk`, "image");
+              session.data.kk_url = await uploadToSupabaseStorage(content.data, `${nomor}/kk`);
               session.step = ["SMP", "SMA"].includes(session.data.jenjang_kode) ? 6 : 8;
               return sock.sendMessage(from, {
                 text: ["SMP", "SMA"].includes(session.data.jenjang_kode)
@@ -226,7 +232,7 @@ async function startBot() {
 
           case 6:
             if (isImage) {
-              session.data.rapor_url = await uploadToSupabaseStorage(content.data, `${nomor}/rapor`, "image");
+              session.data.rapor_url = await uploadToSupabaseStorage(content.data, `${nomor}/rapor`);
               session.step++;
               return sock.sendMessage(from, { text: "Langkah 7: Kirim *Foto Ijazah* (gambar):" });
             } else {
@@ -235,7 +241,7 @@ async function startBot() {
 
           case 7:
             if (isImage) {
-              session.data.ijazah_url = await uploadToSupabaseStorage(content.data, `${nomor}/ijazah`, "image");
+              session.data.ijazah_url = await uploadToSupabaseStorage(content.data, `${nomor}/ijazah`);
               session.step++;
               return sock.sendMessage(from, { text: "Langkah 8: Kirim *Foto Peserta* (gambar):" });
             } else {
@@ -244,7 +250,7 @@ async function startBot() {
 
           case 8:
             if (isImage) {
-              session.data.foto_url = await uploadToSupabaseStorage(content.data, `${nomor}/foto`, "image");
+              session.data.foto_url = await uploadToSupabaseStorage(content.data, `${nomor}/foto`);
 
               // simpan ke database
               await supabase.from("pendaftaran_ppdb").insert([{
@@ -284,21 +290,36 @@ async function startBot() {
 // =====================================
 // Upload ke Supabase Storage
 // =====================================
-async function uploadToSupabaseStorage(messageContent, fileName, type = "image") {
-  const stream = await downloadContentFromMessage(messageContent, type);
-  const buffers = [];
-  for await (const chunk of stream) buffers.push(chunk);
-  const buffer = Buffer.concat(buffers);
+async function uploadToSupabaseStorage(messageContent, fileName) {
+  try {
+    // deteksi tipe
+    let contentType = "image";
+    if (messageContent.mimetype?.startsWith("video/")) contentType = "video";
+    if (messageContent.mimetype?.includes("pdf")) contentType = "document";
 
-  const ext = type === "video" ? "mp4" : type === "document" ? "pdf" : "jpg";
+    const stream = await downloadContentFromMessage(messageContent, contentType);
+    const buffers = [];
+    for await (const chunk of stream) buffers.push(chunk);
+    const buffer = Buffer.concat(buffers);
 
-  const { data, error } = await supabase.storage
-    .from("ppdb-files")
-    .upload(`${fileName}_${Date.now()}.${ext}`, buffer, { upsert: true });
+    let ext = "jpg";
+    if (contentType === "video") ext = "mp4";
+    if (contentType === "document") {
+      const mt = messageContent.mimetype || "";
+      ext = mt.split("/")[1] || "bin";
+    }
 
-  if (error) throw error;
-  const { publicUrl } = supabase.storage.from("ppdb-files").getPublicUrl(data.path);
-  return publicUrl;
+    const { data, error } = await supabase.storage
+      .from("ppdb-files")
+      .upload(`${fileName}_${Date.now()}.${ext}`, buffer, { upsert: true });
+
+    if (error) throw error;
+    const { publicUrl } = supabase.storage.from("ppdb-files").getPublicUrl(data.path);
+    return publicUrl;
+  } catch (err) {
+    console.error("uploadToSupabaseStorage error", err);
+    throw err;
+  }
 }
 
 // =====================================
