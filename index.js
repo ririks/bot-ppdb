@@ -163,7 +163,9 @@ async function startBot() {
       const content = extractMessage(msg);
       if (!content) return;
 
-      console.log("📩 Pesan masuk:", content.type);
+      console.log("=== RAW MESSAGE ===");
+      console.dir(msg.message, { depth: 5 });
+      console.log("📩 Extracted:", content.type);
 
       const isImage = content.type === "image";
       const text = content.type === "text" ? content.data.trim() : "";
