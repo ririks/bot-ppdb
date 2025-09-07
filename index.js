@@ -351,40 +351,63 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
 // Start bot & web server + API
 // =====================================
 startBot().catch(err => console.error("startBot error", err));
-
-import express from "express";
-import cors from "cors";
-
 const app = express();
 app.use(cors({
   origin: "https://dashboard-ppdb-production.up.railway.app"
 }));
 app.use(express.json());
 
-// 🔹 Endpoint untuk dashboard panggil
+// 🔹 Endpoint untuk kirim pesan WA
 app.post("/send-message", async (req, res) => {
-  const { nomor, pesan } = req.body;
-
-  if (!nomor || !pesan) {
-    return res.status(400).json({ error: "Nomor dan pesan wajib diisi" });
-  }
-
   try {
-    // TODO: panggil logika kirim pesan WA pakai Baileys
-    console.log("Kirim ke", nomor, "pesan:", pesan);
+    if (!waSock) return res.status(503).json({ ok: false, error: "WA belum siap" });
 
-    // Misal sukses
-    res.json({ success: true, msg: "Pesan berhasil dikirim" });
+    const { nomor, pesan } = req.body || {};
+    if (!nomor || !pesan) {
+      return res.status(400).json({ ok: false, error: "nomor & pesan wajib diisi" });
+    }
+
+    const jid = toJid(nomor);
+    await waSock.sendMessage(jid, { text: pesan });
+
+    res.json({ ok: true, msg: "Pesan berhasil dikirim" });
   } catch (err) {
-    console.error("Error kirim pesan:", err);
-    res.status(500).json({ error: "Gagal kirim pesan" });
+    console.error("send-message error", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Bot jalan di port ${PORT}`);
+// 🔹 Endpoint approve + kirim notifikasi WA
+app.post("/approve-and-notify", async (req, res) => {
+  try {
+    const { id, nomor, pesan, status = "approved" } = req.body || {};
+    if (!id || !nomor) {
+      return res.status(400).json({ ok: false, error: "id & nomor wajib" });
+    }
+
+    // update status di Supabase
+    const { error } = await supabase
+      .from("pendaftaran_ppdb")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) {
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+
+    // kirim pesan WA
+    if (waSock && pesan) {
+      const jid = toJid(nomor);
+      await waSock.sendMessage(jid, { text: pesan });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("approve-and-notify error", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
+
 
 // ============================
 // Endpoint untuk kirim pesan WA
