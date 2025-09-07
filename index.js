@@ -352,25 +352,38 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
 // =====================================
 startBot().catch(err => console.error("startBot error", err));
 
+import express from "express";
+import cors from "cors";
+
 const app = express();
 app.use(cors({
   origin: "https://dashboard-ppdb-production.up.railway.app"
 }));
 app.use(express.json());
 
-const port = process.env.PORT || 3000;
+// 🔹 Endpoint untuk dashboard panggil
+app.post("/send-message", async (req, res) => {
+  const { nomor, pesan } = req.body;
 
-app.get("/", (req, res) => res.send("✅ Bot WhatsApp PPDB aktif..."));
+  if (!nomor || !pesan) {
+    return res.status(400).json({ error: "Nomor dan pesan wajib diisi" });
+  }
 
-app.get("/qr", async (req, res) => {
-  if (!latestQrData) return res.send("⚠️ QR belum tersedia / sudah discan.");
-  const img = await QRCode.toDataURL(latestQrData);
-  res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
+  try {
+    // TODO: panggil logika kirim pesan WA pakai Baileys
+    console.log("Kirim ke", nomor, "pesan:", pesan);
+
+    // Misal sukses
+    res.json({ success: true, msg: "Pesan berhasil dikirim" });
+  } catch (err) {
+    console.error("Error kirim pesan:", err);
+    res.status(500).json({ error: "Gagal kirim pesan" });
+  }
 });
 
-// Endpoint simpel untuk pengecekan
-app.get("/health", (req, res) => {
-  res.json({ ok: true, waConnected: Boolean(waSock) });
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Bot jalan di port ${PORT}`);
 });
 
 // ============================
