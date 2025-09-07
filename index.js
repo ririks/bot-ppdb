@@ -179,11 +179,26 @@ async function startBot() {
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      if (["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].some(k => lower.includes(k))) {
-        const key = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].find(k => lower.includes(k));
-        const resp = await getFaq(key);
-        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
-      }
+      if (["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].some(k => lower.startsWith(k))) {
+  const key = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"]
+    .find(k => lower.startsWith(k));
+
+  let resp = null;
+
+  if (key === "biaya") {
+    // cek kalau ada jenjang
+    const jenjang = parseJenjang(text);
+    if (jenjang) {
+      resp = await getFaq("biaya", jenjang); // ambil detail TK/SD/SMP/SMA
+    } else {
+      resp = await getFaq("biaya"); // ambil menu utama biaya
+    }
+  } else {
+    resp = await getFaq(key);
+  }
+
+  return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
+}
 
       // === Flow DAFTAR ===
       if (lower.includes("daftar") || sessions[nomor]) {
