@@ -248,10 +248,14 @@ async function startBot() {
   if (isImage) {
     session.data.akta_lahir_url = await uploadToSupabaseStorage(content.data, `${nomor}/akta_lahir`);
 
-    if (session.data.jenjang_kode === "SMP" || session.data.jenjang_kode === "SMA") {
+    if (session.data.jenjang_kode === "SMP") {
       session.step = 7;
-      return sock.sendMessage(from, { text: withFooter("Langkah 7: Kirim *foto Rapor* (gambar):") });
+      return sock.sendMessage(from, { text: withFooter("Langkah 7: Kirim *Foto Rapor SD* (gambar):") });
+    } else if (session.data.jenjang_kode === "SMA") {
+      session.step = 7;
+      return sock.sendMessage(from, { text: withFooter("Langkah 7: Kirim *Foto Rapor SMP* (gambar):") });
     } else {
+      // TK / SD langsung ke foto peserta
       session.step = 9;
       return sock.sendMessage(from, { text: withFooter("Langkah 9: Kirim *Foto Peserta* (gambar):") });
     }
@@ -262,11 +266,17 @@ async function startBot() {
 case 7:
   if (isImage) {
     session.data.rapor_url = await uploadToSupabaseStorage(content.data, `${nomor}/rapor`);
-    session.step = 8;
+
     if (session.data.jenjang_kode === "SMP") {
+      session.step = 8;
       return sock.sendMessage(from, { text: withFooter("Langkah 8: Kirim *Foto Ijazah SD* (gambar):") });
     } else if (session.data.jenjang_kode === "SMA") {
+      session.step = 8;
       return sock.sendMessage(from, { text: withFooter("Langkah 8: Kirim *Foto Ijazah SMP* (gambar):") });
+    } else {
+      // fallback aman → langsung foto peserta
+      session.step = 9;
+      return sock.sendMessage(from, { text: withFooter("Langkah 9: Kirim *Foto Peserta* (gambar):") });
     }
   } else {
     return sock.sendMessage(from, { text: withFooter("❌ Tolong kirim *gambar Rapor*.") });
