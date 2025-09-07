@@ -358,7 +358,26 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// 🔹 Endpoint untuk kirim pesan WA
+const port = process.env.PORT || 3000;
+
+app.get("/", (req, res) => res.send("✅ Bot WhatsApp PPDB aktif..."));
+
+app.get("/qr", async (req, res) => {
+  if (!latestQrData) return res.send("⚠️ QR belum tersedia / sudah discan.");
+  const img = await QRCode.toDataURL(latestQrData);
+  res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
+});
+
+// Endpoint simpel untuk pengecekan
+app.get("/health", (req, res) => {
+  res.json({ ok: true, waConnected: Boolean(waSock) });
+});
+
+// ============================
+// Endpoint untuk kirim pesan WA
+// Dipanggil dari dashboard (daftar.jsx)
+// Body: { nomor: "08xxxx / 62xxxx", pesan: "string" }
+// ============================
 app.post("/send-message", async (req, res) => {
   try {
     if (!waSock) return res.status(503).json({ ok: false, error: "WA belum siap" });
@@ -371,14 +390,16 @@ app.post("/send-message", async (req, res) => {
     const jid = toJid(nomor);
     await waSock.sendMessage(jid, { text: pesan });
 
-    res.json({ ok: true, msg: "Pesan berhasil dikirim" });
+    res.json({ ok: true });
   } catch (err) {
     console.error("send-message error", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// 🔹 Endpoint approve + kirim notifikasi WA
+// (Opsional) Endpoint sekali jalan: update status + kirim pesan
+// Bisa dipakai kalau ingin backend yang urus dua-duanya
+// Body: { id, nomor, pesan, status } -> status default 'approved'
 app.post("/approve-and-notify", async (req, res) => {
   try {
     const { id, nomor, pesan, status = "approved" } = req.body || {};
@@ -409,8 +430,4 @@ app.post("/approve-and-notify", async (req, res) => {
   }
 });
 
-// ✅ Start server (gunakan PORT yang benar)
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌍 Web server berjalan di port ${PORT}`);
-});
+app.listen(port, () => console.log(`🌍 Web server berjalan di port ${port}`)); 
