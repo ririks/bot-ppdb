@@ -179,8 +179,8 @@ async function startBot() {
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      if (["syarat", "jadwal", "kontak", "alamat", "beasiswa", "pendaftaran"].some(k => lower.includes(k))) {
-        const key = ["syarat", "jadwal", "kontak", "alamat", "beasiswa", "pendaftaran"].find(k => lower.includes(k));
+      if (["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].some(k => lower.includes(k))) {
+        const key = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].find(k => lower.includes(k));
         const resp = await getFaq(key);
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
