@@ -312,7 +312,7 @@ case 8:
                 status: "pending",
                 created_at: new Date().toISOString(),
               }]);
-
+              await kurangiKuota(session.data.jenjang_kode);
               sessions[nomor] = null;
               return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
             } else {
@@ -333,6 +333,42 @@ case 8:
 
   return sock;
 }
+
+// =====================================
+// Kurangi Kuota
+// =====================================
+async function kurangiKuota(jenjang) {
+  try {
+    const { data, error } = await supabase
+      .from("kuota_ppdb")
+      .select("jumlah")
+      .eq("jenjang_kode", jenjang)
+      .single();
+
+    if (error || !data) {
+      console.error("❌ Gagal ambil kuota:", error?.message);
+      return;
+    }
+
+    if (data.jumlah > 0) {
+      const { error: updateError } = await supabase
+        .from("kuota_ppdb")
+        .update({ jumlah: data.jumlah - 1 })
+        .eq("jenjang_kode", jenjang);
+
+      if (updateError) {
+        console.error("❌ Gagal update kuota:", updateError.message);
+      } else {
+        console.log(`✅ Kuota ${jenjang} berkurang → ${data.jumlah - 1}`);
+      }
+    } else {
+      console.log(`⚠️ Kuota ${jenjang} sudah habis`);
+    }
+  } catch (err) {
+    console.error("kurangiKuota error", err);
+  }
+}
+
 
 // =====================================
 // Upload ke Supabase Storage
