@@ -180,18 +180,17 @@ async function startBot() {
       }
 
       if (["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].some(k => lower.startsWith(k))) {
-  const key = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"]
-    .find(k => lower.startsWith(k));
+  consconst keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
+const key = keywords.find(k => lower.includes(k));
 
+if (key) {
   let resp = null;
 
   if (key === "biaya" || key === "syarat") {
     const jenjang = parseJenjang(text);
     if (jenjang) {
-      // ambil konten spesifik per jenjang, mis. keyword='syarat', subkey='SMP'
-      resp = await getFaq(key, jenjang);
+      resp = await getFaq(key, jenjang); // contoh: getFaq("syarat","TK")
     } else {
-      // ambil menu utama (tanpa subkey)
       resp = await getFaq(key);
     }
   } else {
