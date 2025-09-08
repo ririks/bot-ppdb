@@ -185,13 +185,14 @@ async function startBot() {
 
   let resp = null;
 
-  if (key === "biaya") {
-    // cek kalau ada jenjang
+  if (key === "biaya" || key === "syarat") {
     const jenjang = parseJenjang(text);
     if (jenjang) {
-      resp = await getFaq("biaya", jenjang); // ambil detail TK/SD/SMP/SMA
+      // ambil konten spesifik per jenjang, mis. keyword='syarat', subkey='SMP'
+      resp = await getFaq(key, jenjang);
     } else {
-      resp = await getFaq("biaya"); // ambil menu utama biaya
+      // ambil menu utama (tanpa subkey)
+      resp = await getFaq(key);
     }
   } else {
     resp = await getFaq(key);
