@@ -179,8 +179,8 @@ async function startBot() {
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      if (["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"].some(k => lower.startsWith(k))) {
-  consconst keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
+      // deteksi keyword di mana saja dalam kalimat
+const keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
 const key = keywords.find(k => lower.includes(k));
 
 if (key) {
@@ -199,6 +199,7 @@ if (key) {
 
   return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
 }
+
 
       // === Flow DAFTAR ===
       if (lower.includes("daftar") || sessions[nomor]) {
