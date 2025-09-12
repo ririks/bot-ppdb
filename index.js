@@ -34,7 +34,6 @@ async function getStepInstruction(step, jenjang = null) {
   let query = supabase.from("form_steps").select("*").eq("step", step);
 
   if (jenjang) {
-    // kalau ada instruksi khusus per jenjang
     query = query.eq("jenjang_kode", jenjang);
   } else {
     query = query.is("jenjang_kode", null);
@@ -42,9 +41,8 @@ async function getStepInstruction(step, jenjang = null) {
 
   const { data, error } = await query.limit(1);
   if (error || !data || data.length === 0) return null;
-  return data[0]; // return seluruh record (instruksi, tipe, kode)
+  return data[0];
 }
-
 
 // =====================================
 // Utility Functions
@@ -72,12 +70,11 @@ async function getFaq(keyword, subkey = null) {
   return data[0].konten;
 }
 
-// Nomor WA -> JID
 function toJid(nomor) {
   if (!nomor) return null;
   let n = String(nomor).replace(/[^\d]/g, "");
   if (n.startsWith("0")) n = "62" + n.slice(1);
-  if (!n.startsWith("62")) n = "62" + n; // fallback ke Indonesia
+  if (!n.startsWith("62")) n = "62" + n;
   return `${n}@s.whatsapp.net`;
 }
 
@@ -102,7 +99,7 @@ const HELP_TEXT = withFooter(`⚡ Hi! Selamat datang di *Chatbot PPDB* 🎉
 // =====================================
 let latestQrData = null;
 const sessions = {};
-let waSock = null; // <-- simpan socket global buat dipakai endpoint API
+let waSock = null;
 
 async function startBot() {
   const authDir = path.join(__dirname, "auth_info");
@@ -139,9 +136,6 @@ async function startBot() {
     }
   });
 
-  // =====================================
-  // Helper ambil isi pesan WA
-  // =====================================
   function extractMessage(msg) {
     if (!msg.message) return null;
 
@@ -195,107 +189,107 @@ async function startBot() {
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      // deteksi keyword di mana saja dalam kalimat
-const keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
-const key = keywords.find(k => lower.includes(k));
+      // keyword deteksi
+      const keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
+      const key = keywords.find(k => lower.includes(k));
 
-if (key) {
-  let resp = null;
+      if (key) {
+        let resp = null;
+        if (key === "biaya" || key === "syarat") {
+          const jenjang = parseJenjang(text);
+          if (jenjang) {
+            resp = await getFaq(key, jenjang);
+          } else {
+            resp = await getFaq(key);
+          }
+        } else {
+          resp = await getFaq(key);
+        }
+        return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
+      }
 
-  if (key === "biaya" || key === "syarat") {
-    const jenjang = parseJenjang(text);
-    if (jenjang) {
-      resp = await getFaq(key, jenjang); // contoh: getFaq("syarat","TK")
-    } else {
-      resp = await getFaq(key);
-    }
-  } else {
-    resp = await getFaq(key);
-  }
-
-  return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
-}
-      
       // === Flow DAFTAR ===
-    // === Flow DAFTAR ===
-if (lower.includes("daftar") || sessions[nomor]) {
-  if (!sessions[nomor]) {
-    sessions[nomor] = { step: 1, data: {} };
-    const instruksi = await getStepInstruction(1);
-    return sock.sendMessage(from, { text: withFooter(instruksi?.instruksi || "⚠️ Langkah 1 belum tersedia.") });
-  }
-
-  const session = sessions[nomor];
-  if (!session) {
-    return sock.sendMessage(from, { text: HELP_TEXT });
-  }
-
-  const instruksiNow = await getStepInstruction(session.step, session.data.jenjang_kode);
-
-  if (!instruksiNow) {
-    sessions[nomor] = null;
-    return sock.sendMessage(from, { text: "❌ Instruksi tidak ditemukan." });
-  }
-
-  if (instruksiNow.tipe === "text") {
-    if (instruksiNow.kode === "data_diri") {
-      const parts = text.split("#").map(p => p.trim()).filter(Boolean);
-      if (parts.length < 4) {
-        return sock.sendMessage(from, { text: withFooter("❌ Format salah. Gunakan format: #Nama #YYYY-MM-DD #Jenjang #NomorKK") });
-      }
-      session.data.nama = parts[0];
-      session.data.tgl_lahir = parts[1];
-      session.data.jenjang_kode = parseJenjang(parts[2]);
-      session.data.nomor_kk = parts[3];
-
-      const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(session.data.tgl_lahir);
-      if (!isValidDate) {
-        return sock.sendMessage(from, { text: withFooter("❌ Format tanggal lahir salah. Gunakan format YYYY-MM-DD.") });
+      if (lower.includes("daftar") || sessions[nomor]) {
+        if (!sessions[nomor]) {
+          sessions[nomor] = { step: 1, data: {} };
+          const instruksi = await getStepInstruction(1);
+          return sock.sendMessage(from, { text: withFooter(instruksi?.instruksi || "⚠️ Langkah 1 belum tersedia.") });
+        }
       }
 
-      if (!session.data.nomor_kk || session.data.nomor_kk.length !== 16) {
-        return sock.sendMessage(from, { text: withFooter("❌ Nomor KK harus 16 digit.") });
+      const session = sessions[nomor];
+      if (!session) {
+        return sock.sendMessage(from, { text: HELP_TEXT });
       }
+
+      const instruksiNow = await getStepInstruction(session.step, session.data.jenjang_kode);
+      if (!instruksiNow) {
+        sessions[nomor] = null;
+        return sock.sendMessage(from, { text: "❌ Instruksi tidak ditemukan." });
+      }
+
+      if (instruksiNow.tipe === "text") {
+        if (instruksiNow.kode === "data_diri") {
+          const parts = text.split("#").map(p => p.trim()).filter(Boolean);
+          if (parts.length < 4) {
+            return sock.sendMessage(from, { text: withFooter("❌ Format salah. Gunakan format: #Nama #YYYY-MM-DD #Jenjang #NomorKK") });
+          }
+          session.data.nama = parts[0];
+          session.data.tgl_lahir = parts[1];
+          session.data.jenjang_kode = parseJenjang(parts[2]);
+          session.data.nomor_kk = parts[3];
+
+          const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(session.data.tgl_lahir);
+          if (!isValidDate) {
+            return sock.sendMessage(from, { text: withFooter("❌ Format tanggal lahir salah. Gunakan format YYYY-MM-DD.") });
+          }
+
+          if (!session.data.nomor_kk || session.data.nomor_kk.length !== 16) {
+            return sock.sendMessage(from, { text: withFooter("❌ Nomor KK harus 16 digit.") });
+          }
+        }
+      }
+
+      if (instruksiNow.tipe === "image") {
+        if (!isImage) {
+          return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk ${instruksiNow.kode.toUpperCase()}.`) });
+        }
+        session.data[`${instruksiNow.kode}_url`] = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
+      }
+
+      // next step
+      session.step++;
+      const instruksiNext = await getStepInstruction(session.step, session.data.jenjang_kode);
+      if (instruksiNext) {
+        return sock.sendMessage(from, { text: withFooter(instruksiNext.instruksi) });
+      } else {
+        await supabase.from("pendaftaran_ppdb").insert([{
+          nomor,
+          nama: session.data.nama,
+          tgl_lahir: session.data.tgl_lahir,
+          jenjang_kode: session.data.jenjang_kode,
+          nomor_kk: session.data.nomor_kk,
+          kk_url: session.data.kk_url || null,
+          akta_url: session.data.akta_url || null,
+          rapor_url: session.data.rapor_url || null,
+          ijazah_url: session.data.ijazah_url || null,
+          foto_url: session.data.foto_url || null,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        }]);
+
+        await kurangiKuota(session.data.jenjang_kode);
+        sessions[nomor] = null;
+
+        console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
+
+        return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
+      }
+    } catch (err) {
+      console.error("messages.upsert error", err);
     }
-  }
+  });
 
-  if (instruksiNow.tipe === "image") {
-    if (!isImage) {
-      return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk ${instruksiNow.kode.toUpperCase()}.`) });
-    }
-    session.data[`${instruksiNow.kode}_url`] = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
-  }
-
-  // lanjut ke step berikutnya
-  session.step++;
-  const instruksiNext = await getStepInstruction(session.step, session.data.jenjang_kode);
-
-  if (instruksiNext) {
-    return sock.sendMessage(from, { text: withFooter(instruksiNext.instruksi) });
-  } else {
-    await supabase.from("pendaftaran_ppdb").insert([{
-      nomor,
-      nama: session.data.nama,
-      tgl_lahir: session.data.tgl_lahir,
-      jenjang_kode: session.data.jenjang_kode,
-      nomor_kk: session.data.nomor_kk,
-      kk_url: session.data.kk_url || null,
-      akta_url: session.data.akta_url || null,
-      rapor_url: session.data.rapor_url || null,
-      ijazah_url: session.data.ijazah_url || null,
-      foto_url: session.data.foto_url || null,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    }]);
-
-    await kurangiKuota(session.data.jenjang_kode);
-    sessions[nomor] = null;
-
-    console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
-
-    return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
-  }
-}
   return sock;
 }
 
@@ -334,7 +328,6 @@ async function kurangiKuota(jenjang) {
   }
 }
 
-
 // =====================================
 // Upload ke Supabase Storage
 // =====================================
@@ -356,7 +349,6 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
       ext = mt.split("/")[1] || "bin";
     }
 
-    // nama file unik
     const filePath = `${fileName}_${Date.now()}.${ext}`;
 
     const { error } = await supabase.storage
@@ -365,7 +357,6 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
 
     if (error) throw error;
 
-    // selalu ambil publicUrl dari filePath
     const { data: publicData } = supabase
       .storage
       .from("ppdb-files")
@@ -399,16 +390,10 @@ app.get("/qr", async (req, res) => {
   res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
 });
 
-// Endpoint simpel untuk pengecekan
 app.get("/health", (req, res) => {
   res.json({ ok: true, waConnected: Boolean(waSock) });
 });
 
-// ============================
-// Endpoint untuk kirim pesan WA
-// Dipanggil dari dashboard (daftar.jsx)
-// Body: { nomor: "08xxxx / 62xxxx", pesan: "string" }
-// ============================
 app.post("/send-message", async (req, res) => {
   try {
     if (!waSock) return res.status(503).json({ ok: false, error: "WA belum siap" });
@@ -428,9 +413,6 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
-// (Opsional) Endpoint sekali jalan: update status + kirim pesan
-// Bisa dipakai kalau ingin backend yang urus dua-duanya
-// Body: { id, nomor, pesan, status } -> status default 'approved'
 app.post("/approve-and-notify", async (req, res) => {
   try {
     const { id, nomor, pesan, status = "approved" } = req.body || {};
@@ -438,7 +420,6 @@ app.post("/approve-and-notify", async (req, res) => {
       return res.status(400).json({ ok: false, error: "id & nomor wajib" });
     }
 
-    // update status di Supabase
     const { error } = await supabase
       .from("pendaftaran_ppdb")
       .update({ status })
@@ -448,7 +429,6 @@ app.post("/approve-and-notify", async (req, res) => {
       return res.status(500).json({ ok: false, error: error.message });
     }
 
-    // kirim pesan WA
     if (waSock && pesan) {
       const jid = toJid(nomor);
       await waSock.sendMessage(jid, { text: pesan });
@@ -461,4 +441,4 @@ app.post("/approve-and-notify", async (req, res) => {
   }
 });
 
-app.listen(port, () => console.log(`🌍 Web server berjalan di port ${port}`)); 
+app.listen(port, () => console.log(`🌍 Web server berjalan di port ${port}`));
