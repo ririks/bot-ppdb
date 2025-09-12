@@ -34,7 +34,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 // Helpers DB: ambil instruksi step
 // =====================================
 async function getStepInstruction(step, jenjang = null) {
-  // ambil instruksi untuk step tertentu; kalau ada jenjang khusus gunakan filter jenjang_kode
   let query = supabase.from("form_steps").select("*").eq("step", step);
 
   if (jenjang) query = query.eq("jenjang_kode", jenjang);
@@ -75,7 +74,6 @@ async function getFaq(keyword, subkey = null) {
   return data[0].konten;
 }
 
-// Nomor WA -> JID
 function toJid(nomor) {
   if (!nomor) return null;
   let n = String(nomor).replace(/[^\d]/g, "");
@@ -176,12 +174,11 @@ async function startBot() {
       if (msg.key.fromMe) return;
 
       const from = msg.key.remoteJid;
-      if (from.endsWith("@g.us")) return; // skip grup
+      if (from.endsWith("@g.us")) return;
 
       const nama = msg.pushName || "Tanpa Nama";
       const nomor = from.replace("@s.whatsapp.net", "");
 
-      // simpan/refresh user di tabel users_wa
       await supabase.from("users_wa").upsert({ nomor, nama }, { onConflict: "nomor" });
 
       const content = extractMessage(msg);
@@ -191,13 +188,11 @@ async function startBot() {
       const text = content.type === "text" ? (content.data || "").trim() : "";
       const lower = (text || "").toLowerCase();
 
-      // handle menu/start
       if (["menu", "help", "start", "mulai"].includes(lower)) {
         sessions[nomor] = null;
         return sock.sendMessage(from, { text: HELP_TEXT });
       }
 
-      // deteksi FAQ keywords
       const keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
       const key = keywords.find(k => lower.includes(k));
       if (key) {
@@ -212,124 +207,113 @@ async function startBot() {
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
 
-      // === Flow PENDAFTARAN (dynamic via form_steps) ===
+      // === Flow PENDAFTARAN ===
       if (lower.includes("daftar") || sessions[nomor]) {
-        // start new session if belum ada
         if (!sessions[nomor]) {
           sessions[nomor] = { step: 1, data: {} };
           const instruksi = await getStepInstruction(1);
           return sock.sendMessage(from, { text: withFooter(instruksi?.instruksi || "⚠️ Langkah 1 belum tersedia.") });
         }
 
-        // existing session: process current step
         const session = sessions[nomor];
         if (!session) return sock.sendMessage(from, { text: HELP_TEXT });
 
-        // ambil instruksi saat ini (gunakan jenjang kalau sudah tersedia di session.data)
         const instruksiNow = await getStepInstruction(session.step, session.data.jenjang_kode);
         if (!instruksiNow) {
-          // jangan langsung insert; berikan pesan error agar admin cek table form_steps
           console.error(`Instruksi tidak ditemukan untuk step=${session.step} jenjang=${session.data.jenjang_kode}`);
           sessions[nomor] = null;
-          return sock.sendMessage(from, { text: withFooter("⚠️ Instruksi for next step tidak ditemukan. Hubungi admin.") });
+          return sock.sendMessage(from, { text: withFooter("⚠️ Instruksi step tidak ditemukan. Hubungi admin.") });
         }
 
-        // Handle tipe text
+        // === handle text ===
         if (instruksiNow.tipe === "text") {
           if (instruksiNow.kode === "data_diri") {
-            // expect format: #Nama #YYYY-MM-DD #Jenjang #NomorKK
             const parts = text.split("#").map(p => p.trim()).filter(Boolean);
             if (parts.length < 4) {
-              return sock.sendMessage(from, { text: withFooter("❌ Format salah. Gunakan format: #Nama #YYYY-MM-DD #Jenjang #NomorKK") });
+              return sock.sendMessage(from, { text: withFooter("❌ Format salah. Gunakan: #Nama #YYYY-MM-DD #Jenjang #NomorKK") });
             }
             const namaSiswa = parts[0];
             const tgl = parts[1];
             const jen = parseJenjang(parts[2]);
             const nomorKK = parts[3].replace(/\s+/g, "");
 
-            // validasi tanggal
-            const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(tgl);
-            if (!isValidDate) {
-              return sock.sendMessage(from, { text: withFooter("❌ Format tanggal lahir salah. Gunakan format YYYY-MM-DD.") });
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(tgl)) {
+              return sock.sendMessage(from, { text: withFooter("❌ Format tanggal salah (YYYY-MM-DD).") });
             }
             if (!jen) {
-              return sock.sendMessage(from, { text: withFooter("❌ Jenjang tidak valid. Masukkan TK/SD/SMP/SMA.") });
+              return sock.sendMessage(from, { text: withFooter("❌ Jenjang tidak valid. Pilih TK/SD/SMP/SMA.") });
             }
             if (!/^\d{16}$/.test(nomorKK)) {
               return sock.sendMessage(from, { text: withFooter("❌ Nomor KK harus 16 digit.") });
             }
 
-            // simpan ke session
             session.data.nama = namaSiswa;
             session.data.tgl_lahir = tgl;
             session.data.jenjang_kode = jen;
             session.data.nomor_kk = nomorKK;
           } else {
-            // other text-type steps (if any): simpan ke session.data berdasarkan kode
             session.data[instruksiNow.kode] = text;
           }
         }
 
-        // Handle tipe image
+        // === handle image ===
         else if (instruksiNow.tipe === "image") {
           if (!isImage) {
             return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk ${instruksiNow.instruksi}`) });
           }
-          // upload dan simpan URL di session.data (field: <kode>_url)
           try {
             const uploadedUrl = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
             session.data[`${instruksiNow.kode}_url`] = uploadedUrl;
-            // optionally: if you want to also store somewhere else (e.g. form responses table), do here.
           } catch (err) {
             console.error("upload error", err);
             return sock.sendMessage(from, { text: withFooter("❌ Gagal upload gambar. Coba lagi.") });
           }
         }
 
-        // Setelah memproses instruksiNow → tentukan apakah ada instruksi untuk step berikutnya
+        // === cek step berikutnya ===
         const nextStep = session.step + 1;
         const instruksiNext = await getStepInstruction(nextStep, session.data.jenjang_kode);
 
         if (instruksiNext) {
-          // belum selesai semua step: naikkan step dan kirim instruksi next
           session.step = nextStep;
           return sock.sendMessage(from, { text: withFooter(instruksiNext.instruksi) });
         } else {
-          // tidak ada instruksi next → berarti instruksiNow adalah step terakhir untuk jenjang terkait
-          // lakukan insert pendaftaran
-          try {
-            await supabase.from("pendaftaran_ppdb").insert([{
-              nomor,
-              nama: session.data.nama || null,
-              tgl_lahir: session.data.tgl_lahir || null,
-              jenjang_kode: session.data.jenjang_kode || null,
-              nomor_kk: session.data.nomor_kk || null,
-              kk_url: session.data.kk_url || null,
-              akta_url: session.data.akta_url || null,
-              rapor_url: session.data.rapor_url || null,
-              ijazah_url: session.data.ijazah_url || null,
-              foto_url: session.data.foto_url || null,
-              status: "pending",
-              created_at: new Date().toISOString(),
-            }]);
-          } catch (insertErr) {
-            console.error("insert pendaftaran_ppdb error", insertErr);
+          // hanya insert kalau step terakhir (foto)
+          if (instruksiNow.kode === "foto") {
+            try {
+              await supabase.from("pendaftaran_ppdb").insert([{
+                nomor,
+                nama: session.data.nama || null,
+                tgl_lahir: session.data.tgl_lahir || null,
+                jenjang_kode: session.data.jenjang_kode || null,
+                nomor_kk: session.data.nomor_kk || null,
+                kk_url: session.data.kk_url || null,
+                akta_url: session.data.akta_url || null,
+                rapor_url: session.data.rapor_url || null,
+                ijazah_url: session.data.ijazah_url || null,
+                foto_url: session.data.foto_url || null,
+                status: "pending",
+                created_at: new Date().toISOString(),
+              }]);
+
+              await kurangiKuota(session.data.jenjang_kode);
+              sessions[nomor] = null;
+
+              console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
+              return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
+            } catch (insertErr) {
+              console.error("insert error", insertErr);
+              sessions[nomor] = null;
+              return sock.sendMessage(from, { text: withFooter("❌ Gagal simpan pendaftaran. Hubungi admin.") });
+            }
+          } else {
+            console.error(`❌ Instruksi hilang sebelum selesai. step=${session.step}, kode=${instruksiNow.kode}`);
             sessions[nomor] = null;
-            return sock.sendMessage(from, { text: withFooter("❌ Gagal menyimpan pendaftaran. Hubungi admin.") });
+            return sock.sendMessage(from, { text: withFooter("⚠️ Instruksi berikutnya tidak ditemukan. Hubungi admin.") });
           }
-
-          // update kuota
-          await kurangiKuota(session.data.jenjang_kode);
-
-          // reset session
-          sessions[nomor] = null;
-
-          console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
-          return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
         }
-      } // end flow daftar
+      }
 
-      // default fallback
       return sock.sendMessage(from, { text: HELP_TEXT });
     } catch (err) {
       console.error("messages.upsert error", err);
@@ -362,11 +346,8 @@ async function kurangiKuota(jenjang) {
         .update({ jumlah: data.jumlah - 1 })
         .eq("jenjang_kode", jenjang);
 
-      if (updateError) {
-        console.error("❌ Gagal update kuota:", updateError.message);
-      } else {
-        console.log(`✅ Kuota ${jenjang} berkurang → ${data.jumlah - 1}`);
-      }
+      if (updateError) console.error("❌ Gagal update kuota:", updateError.message);
+      else console.log(`✅ Kuota ${jenjang} berkurang → ${data.jumlah - 1}`);
     } else {
       console.log(`⚠️ Kuota ${jenjang} sudah habis`);
     }
@@ -397,18 +378,10 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
     }
 
     const filePath = `${fileName}_${Date.now()}.${ext}`;
-
-    const { error } = await supabase.storage
-      .from("ppdb-files")
-      .upload(filePath, buffer, { upsert: true });
-
+    const { error } = await supabase.storage.from("ppdb-files").upload(filePath, buffer, { upsert: true });
     if (error) throw error;
 
-    const { data: publicData } = supabase
-      .storage
-      .from("ppdb-files")
-      .getPublicUrl(filePath);
-
+    const { data: publicData } = supabase.storage.from("ppdb-files").getPublicUrl(filePath);
     return publicData.publicUrl || "BELUM ADA";
   } catch (err) {
     console.error("uploadToSupabaseStorage error", err);
@@ -417,14 +390,12 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
 }
 
 // =====================================
-// Start bot & web server + API
+// Start bot & web server
 // =====================================
 startBot().catch(err => console.error("startBot error", err));
 
 const app = express();
-app.use(cors({
-  origin: "https://dashboard-ppdb-production.up.railway.app"
-}));
+app.use(cors({ origin: "https://dashboard-ppdb-production.up.railway.app" }));
 app.use(express.json());
 
 const port = process.env.PORT || 3000;
@@ -437,21 +408,17 @@ app.get("/qr", async (req, res) => {
   res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
 });
 
-app.get("/health", (req, res) => {
-  res.json({ ok: true, waConnected: Boolean(waSock) });
-});
+app.get("/health", (req, res) => res.json({ ok: true, waConnected: Boolean(waSock) }));
 
-// send-message endpoint (dashboard)
 app.post("/send-message", async (req, res) => {
   try {
     if (!waSock) return res.status(503).json({ ok: false, error: "WA belum siap" });
 
     const { nomor, pesan } = req.body || {};
-    if (!nomor || !pesan) return res.status(400).json({ ok: false, error: "nomor & pesan wajib diisi" });
+    if (!nomor || !pesan) return res.status(400).json({ ok: false, error: "nomor & pesan wajib" });
 
     const jid = toJid(nomor);
     await waSock.sendMessage(jid, { text: pesan });
-
     res.json({ ok: true });
   } catch (err) {
     console.error("send-message error", err);
@@ -459,31 +426,9 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
-// approve-and-notify
 app.post("/approve-and-notify", async (req, res) => {
   try {
     const { id, nomor, pesan, status = "approved" } = req.body || {};
     if (!id || !nomor) return res.status(400).json({ ok: false, error: "id & nomor wajib" });
 
     const { error } = await supabase
-      .from("pendaftaran_ppdb")
-      .update({ status })
-      .eq("id", id);
-
-    if (error) {
-      return res.status(500).json({ ok: false, error: error.message });
-    }
-
-    if (waSock && pesan) {
-      const jid = toJid(nomor);
-      await waSock.sendMessage(jid, { text: pesan });
-    }
-
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("approve-and-notify error", err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-app.listen(port, () => console.log(`🌍 Web server berjalan di port ${port}`));
