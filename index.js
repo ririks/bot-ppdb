@@ -217,92 +217,85 @@ if (key) {
 }
       
       // === Flow DAFTAR ===
-    if (lower.includes("daftar") || sessions[nomor]) {
+    // === Flow DAFTAR ===
+if (lower.includes("daftar") || sessions[nomor]) {
   if (!sessions[nomor]) {
     sessions[nomor] = { step: 1, data: {} };
     const instruksi = await getStepInstruction(1);
     return sock.sendMessage(from, { text: withFooter(instruksi?.instruksi || "⚠️ Langkah 1 belum tersedia.") });
   }
-}
 
-        const session = sessions[nomor];
-if (!session) {
-  return sock.sendMessage(from, { text: HELP_TEXT });
-}
+  const session = sessions[nomor];
+  if (!session) {
+    return sock.sendMessage(from, { text: HELP_TEXT });
+  }
 
-const instruksiNow = await getStepInstruction(session.step, session.data.jenjang_kode);
+  const instruksiNow = await getStepInstruction(session.step, session.data.jenjang_kode);
 
-if (!instruksiNow) {
-  sessions[nomor] = null;
-  return sock.sendMessage(from, { text: "❌ Instruksi tidak ditemukan." });
-}
+  if (!instruksiNow) {
+    sessions[nomor] = null;
+    return sock.sendMessage(from, { text: "❌ Instruksi tidak ditemukan." });
+  }
 
-if (instruksiNow.tipe === "text") {
-  // validasi input
-  if (instruksiNow.kode === "data_diri") {
-    // parsing input jadi nama, tgl lahir, jenjang, nomor kk
-    const parts = text.split("#").map(p => p.trim()).filter(Boolean);
-    if (parts.length < 4) {
-      return sock.sendMessage(from, { text: withFooter("❌ Format salah. Gunakan format: #Nama #YYYY-MM-DD #Jenjang #NomorKK") });
-    }
-    session.data.nama = parts[0];
-    session.data.tgl_lahir = parts[1];
-    session.data.jenjang_kode = parseJenjang(parts[2]);
-    session.data.nomor_kk = parts[3];
+  if (instruksiNow.tipe === "text") {
+    if (instruksiNow.kode === "data_diri") {
+      const parts = text.split("#").map(p => p.trim()).filter(Boolean);
+      if (parts.length < 4) {
+        return sock.sendMessage(from, { text: withFooter("❌ Format salah. Gunakan format: #Nama #YYYY-MM-DD #Jenjang #NomorKK") });
+      }
+      session.data.nama = parts[0];
+      session.data.tgl_lahir = parts[1];
+      session.data.jenjang_kode = parseJenjang(parts[2]);
+      session.data.nomor_kk = parts[3];
 
-    const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(session.data.tgl_lahir);
-    if (!isValidDate) {
-      return sock.sendMessage(from, { text: withFooter("❌ Format tanggal lahir salah. Gunakan format YYYY-MM-DD.") });
-    }
+      const isValidDate = /^\d{4}-\d{2}-\d{2}$/.test(session.data.tgl_lahir);
+      if (!isValidDate) {
+        return sock.sendMessage(from, { text: withFooter("❌ Format tanggal lahir salah. Gunakan format YYYY-MM-DD.") });
+      }
 
-    if (!session.data.nomor_kk || session.data.nomor_kk.length !== 16) {
-      return sock.sendMessage(from, { text: withFooter("❌ Nomor KK harus 16 digit.") });
+      if (!session.data.nomor_kk || session.data.nomor_kk.length !== 16) {
+        return sock.sendMessage(from, { text: withFooter("❌ Nomor KK harus 16 digit.") });
+      }
     }
   }
-}
 
-if (instruksiNow.tipe === "image") {
-  if (!isImage) {
-    return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk ${instruksiNow.kode.toUpperCase()}.`) });
-  }
-  session.data[`${instruksiNow.kode}_url`] = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
-}
-
-// lanjut ke step berikutnya
-session.step++;
-const instruksiNext = await getStepInstruction(session.step, session.data.jenjang_kode);
-
-if (instruksiNext) {
-  return sock.sendMessage(from, { text: withFooter(instruksiNext.instruksi) });
-} else {
-  // berarti step terakhir → simpan data ke pendaftaran_ppdb
-  await supabase.from("pendaftaran_ppdb").insert([{
-    nomor,
-    nama: session.data.nama,
-    tgl_lahir: session.data.tgl_lahir,
-    jenjang_kode: session.data.jenjang_kode,
-    nomor_kk: session.data.nomor_kk,
-    kk_url: session.data.kk_url || null,
-    akta_url: session.data.akta_url || null,
-    rapor_url: session.data.rapor_url || null,
-    ijazah_url: session.data.ijazah_url || null,
-    foto_url: session.data.foto_url || null,
-    status: "pending",
-    created_at: new Date().toISOString(),
-  }]);
-
-  await kurangiKuota(session.data.jenjang_kode);
-sessions[nomor] = null;
-
-// ✅ Log sukses
-console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
-
-return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
-    } catch (err) {
-      console.error("messages.upsert error", err);
+  if (instruksiNow.tipe === "image") {
+    if (!isImage) {
+      return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk ${instruksiNow.kode.toUpperCase()}.`) });
     }
-  });
+    session.data[`${instruksiNow.kode}_url`] = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
+  }
 
+  // lanjut ke step berikutnya
+  session.step++;
+  const instruksiNext = await getStepInstruction(session.step, session.data.jenjang_kode);
+
+  if (instruksiNext) {
+    return sock.sendMessage(from, { text: withFooter(instruksiNext.instruksi) });
+  } else {
+    await supabase.from("pendaftaran_ppdb").insert([{
+      nomor,
+      nama: session.data.nama,
+      tgl_lahir: session.data.tgl_lahir,
+      jenjang_kode: session.data.jenjang_kode,
+      nomor_kk: session.data.nomor_kk,
+      kk_url: session.data.kk_url || null,
+      akta_url: session.data.akta_url || null,
+      rapor_url: session.data.rapor_url || null,
+      ijazah_url: session.data.ijazah_url || null,
+      foto_url: session.data.foto_url || null,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    }]);
+
+    await kurangiKuota(session.data.jenjang_kode);
+    sessions[nomor] = null;
+
+    console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
+
+    return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
+  }
+}
   return sock;
 }
 
