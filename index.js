@@ -300,7 +300,7 @@ async function startBot() {
               jenjang_kode: session.data.jenjang_kode || null,
               nomor_kk: session.data.nomor_kk || null,
               kk_url: session.data.kk_url || null,
-              akta_url: session.data.akta_url || null,
+              akta_lahir_url: session.data.akta_lahir_url || null,
               rapor_url: session.data.rapor_url || null,
               ijazah_url: session.data.ijazah_url || null,
               foto_url: session.data.foto_url || null,
