@@ -311,8 +311,6 @@ async function startBot() {
   status: "pending",
   created_at: new Date().toISOString(),
 }]);
-
-            }]);
           } catch (insertErr) {
             console.error("insert pendaftaran_ppdb error", insertErr);
             sessions[nomor] = null;
