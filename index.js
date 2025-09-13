@@ -269,18 +269,22 @@ async function startBot() {
             session.data[instruksiNow.kode] = text;
           }
         } else if (instruksiNow.tipe === "image") {
-          // handle image-type step
-          if (!isImage) {
-            return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk: ${instruksiNow.instruksi}`) });
-          }
-          try {
-            const uploadedUrl = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
-            session.data[`${instruksiNow.kode}_url`] = uploadedUrl;
-          } catch (err) {
-            console.error("upload error", err);
-            return sock.sendMessage(from, { text: withFooter("❌ Gagal upload gambar. Coba lagi.") });
-          }
-        }
+  if (!isImage) {
+    return sock.sendMessage(from, { text: withFooter(`❌ Tolong kirim *gambar* untuk: ${instruksiNow.instruksi}`) });
+  }
+  try {
+    const uploadedUrl = await uploadToSupabaseStorage(content.data, `${nomor}/${instruksiNow.kode}`);
+    if (instruksiNow.kode === "akta") {
+      session.data.akta_lahir_url = uploadedUrl; // FIX: sesuai nama kolom
+    } else {
+      session.data[`${instruksiNow.kode}_url`] = uploadedUrl;
+    }
+  } catch (err) {
+    console.error("upload error", err);
+    return sock.sendMessage(from, { text: withFooter("❌ Gagal upload gambar. Coba lagi.") });
+  }
+}
+
 
         // move to next step if exists
         const nextStep = session.step + 1;
@@ -294,18 +298,20 @@ async function startBot() {
           // tidak ada langkah selanjutnya -> simpan pendaftaran
           try {
             await supabase.from("pendaftaran_ppdb").insert([{
-              nomor,
-              nama: session.data.nama || null,
-              tgl_lahir: session.data.tgl_lahir || null,
-              jenjang_kode: session.data.jenjang_kode || null,
-              nomor_kk: session.data.nomor_kk || null,
-              kk_url: session.data.kk_url || null,
-              akta_lahir_url: session.data.akta_lahir_url || null,
-              rapor_url: session.data.rapor_url || null,
-              ijazah_url: session.data.ijazah_url || null,
-              foto_url: session.data.foto_url || null,
-              status: "pending",
-              created_at: new Date().toISOString(),
+  nomor,
+  nama: session.data.nama || null,
+  tgl_lahir: session.data.tgl_lahir || null,
+  jenjang_kode: session.data.jenjang_kode || null,
+  nomor_kk: session.data.nomor_kk || null,
+  kk_url: session.data.kk_url || "BELUM ADA",
+  akta_lahir_url: session.data.akta_lahir_url || "BELUM ADA",
+  rapor_url: session.data.rapor_url || "BELUM ADA",
+  ijazah_url: session.data.ijazah_url || "BELUM ADA",
+  foto_url: session.data.foto_url || "BELUM ADA",
+  status: "pending",
+  created_at: new Date().toISOString(),
+}]);
+
             }]);
           } catch (insertErr) {
             console.error("insert pendaftaran_ppdb error", insertErr);
