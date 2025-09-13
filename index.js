@@ -75,6 +75,23 @@ async function handleMessage(msg) {
 }
 
 // =====================================
+// Helpers DB: ambil pesan log
+// =====================================
+async function getPesan(kode) {
+  const { data, error } = await supabase
+    .from("pesan_log")
+    .select("isi")
+    .eq("kode", kode)
+    .single();
+
+  if (error || !data) {
+    console.error("❌ getPesan error:", error?.message || "not found");
+    return "⚠️ Pesan tidak tersedia. Hubungi admin.";
+  }
+  return data.isi;
+}
+
+// =====================================
 // Utility Functions
 // =====================================
 function parseJenjang(text) {
@@ -250,15 +267,22 @@ async function startBot() {
             const jen = parseJenjang(parts[2]);
             const nomorKK = parts[3].replace(/\s+/g, "");
 
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(tgl)) {
-              return sock.sendMessage(from, { text: withFooter("❌ Format tanggal salah (YYYY-MM-DD).") });
-            }
-            if (!jen) {
-              return sock.sendMessage(from, { text: withFooter("❌ Jenjang tidak valid. Pilih TK/SD/SMP/SMA.") });
-            }
-            if (!/^\d{16}$/.test(nomorKK)) {
-              return sock.sendMessage(from, { text: withFooter("❌ Nomor KK harus 16 digit.") });
-            }
+            if (parts.length < 4) {
+  return sock.sendMessage(from, { text: withFooter(await getPesan("format_data_diri_salah")) });
+}
+
+if (!/^\d{4}-\d{2}-\d{2}$/.test(tgl)) {
+  return sock.sendMessage(from, { text: withFooter(await getPesan("tanggal_invalid")) });
+}
+
+if (!jen) {
+  return sock.sendMessage(from, { text: withFooter(await getPesan("jenjang_invalid")) });
+}
+
+if (!/^\d{16}$/.test(nomorKK)) {
+  return sock.sendMessage(from, { text: withFooter(await getPesan("kk_invalid")) });
+}
+
 
             session.data.nama = namaSiswa;
             session.data.tgl_lahir = tgl;
@@ -279,13 +303,12 @@ async function startBot() {
     } else {
       session.data[`${instruksiNow.kode}_url`] = uploadedUrl;
     }
-  } catch (err) {
-    console.error("upload error", err);
-    return sock.sendMessage(from, { text: withFooter("❌ Gagal upload gambar. Coba lagi.") });
-  }
+  } } catch (err) {
+  console.error("upload error", err);
+  return sock.sendMessage(from, { text: withFooter(await getPesan("upload_gagal")) });
 }
 
-
+}
         // move to next step if exists
         const nextStep = session.step + 1;
         const instruksiNext = await getStepInstruction(nextStep, session.data.jenjang_kode);
@@ -321,7 +344,7 @@ async function startBot() {
           sessions[nomor] = null;
 
           console.log(`✅ Pendaftaran baru: ${session.data.nama} (${session.data.jenjang_kode})`);
-          return sock.sendMessage(from, { text: withFooter("✅ Pendaftaran berhasil! Terima kasih.") });
+return sock.sendMessage(from, { text: withFooter(await getPesan("pendaftaran_berhasil")) });
         }
       } // end session flow
 
