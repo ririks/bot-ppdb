@@ -390,12 +390,14 @@ async function uploadToSupabaseStorage(messageContent, fileName) {
 }
 
 // =====================================
-// Start bot & web server
+// Start bot & web server + API
 // =====================================
 startBot().catch(err => console.error("startBot error", err));
 
 const app = express();
-app.use(cors({ origin: "https://dashboard-ppdb-production.up.railway.app" }));
+app.use(cors({
+  origin: "https://dashboard-ppdb-production.up.railway.app"
+}));
 app.use(express.json());
 
 const port = process.env.PORT || 3000;
@@ -408,17 +410,21 @@ app.get("/qr", async (req, res) => {
   res.send(`<h2>Scan QR WhatsApp</h2><img src="${img}" />`);
 });
 
-app.get("/health", (req, res) => res.json({ ok: true, waConnected: Boolean(waSock) }));
+app.get("/health", (req, res) => {
+  res.json({ ok: true, waConnected: Boolean(waSock) });
+});
 
+// send-message endpoint (dashboard)
 app.post("/send-message", async (req, res) => {
   try {
     if (!waSock) return res.status(503).json({ ok: false, error: "WA belum siap" });
 
     const { nomor, pesan } = req.body || {};
-    if (!nomor || !pesan) return res.status(400).json({ ok: false, error: "nomor & pesan wajib" });
+    if (!nomor || !pesan) return res.status(400).json({ ok: false, error: "nomor & pesan wajib diisi" });
 
     const jid = toJid(nomor);
     await waSock.sendMessage(jid, { text: pesan });
+
     res.json({ ok: true });
   } catch (err) {
     console.error("send-message error", err);
@@ -426,9 +432,35 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
+// approve-and-notify
 app.post("/approve-and-notify", async (req, res) => {
   try {
     const { id, nomor, pesan, status = "approved" } = req.body || {};
     if (!id || !nomor) return res.status(400).json({ ok: false, error: "id & nomor wajib" });
 
     const { error } = await supabase
+      .from("pendaftaran_ppdb")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) {
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+
+    if (waSock && pesan) {
+      const jid = toJid(nomor);
+      await waSock.sendMessage(jid, { text: pesan });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("approve-and-notify error", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ✅ FIXED bagian ini
+app.listen(port, () => {
+  console.log(`🌍 Web server berjalan di port ${port}`);
+});
+
