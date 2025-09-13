@@ -303,7 +303,7 @@ if (!/^\d{16}$/.test(nomorKK)) {
     } else {
       session.data[`${instruksiNow.kode}_url`] = uploadedUrl;
     }
-  } } catch (err) {
+  }  catch (err) {
   console.error("upload error", err);
   return sock.sendMessage(from, { text: withFooter(await getPesan("upload_gagal")) });
 }
