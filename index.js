@@ -297,7 +297,7 @@ async function startBot() {
         } else {
           // tidak ada langkah selanjutnya -> simpan pendaftaran
           try {
-            await supabase.from("pendaftaran_ppdb").insert([{
+           await supabase.from("pendaftaran_ppdb").insert([{
   nomor,
   nama: session.data.nama || null,
   tgl_lahir: session.data.tgl_lahir || null,
