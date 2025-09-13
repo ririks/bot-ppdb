@@ -34,18 +34,44 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 // Helpers DB: ambil instruksi step
 // =====================================
 async function getStepInstruction(step, jenjang = null) {
-  let query = supabase.from("form_steps").select("*").eq("step", step);
+  let { data, error } = await supabase
+    .from("form_steps")
+    .select("*")
+    .eq("step", step)
+    .order("jenjang_kode", { ascending: false }); // biar jenjang lebih prioritas
 
-  if (jenjang) query = query.eq("jenjang_kode", jenjang);
-  else query = query.is("jenjang_kode", null);
+  if (error || !data) return null;
 
-  const { data, error } = await query.limit(1);
-  if (error) {
-    console.error("getStepInstruction error", error);
-    return null;
+  if (jenjang) {
+    // cari dulu instruksi khusus sesuai jenjang
+    const khusus = data.find((d) => d.jenjang_kode === jenjang);
+    if (khusus) return khusus;
   }
-  if (!data || data.length === 0) return null;
-  return data[0];
+
+  // fallback ke instruksi umum (jenjang_kode null)
+  return data.find((d) => d.jenjang_kode === null) || null;
+}
+
+// =====================================
+// Handler pesan WA (pakai getStepInstruction)
+// =====================================
+async function handleMessage(msg) {
+  const from = msg.key.remoteJid;
+  const body = msg.message?.conversation || "";
+
+  // ambil step berikutnya dari session
+  const session = getSession(from);
+
+  const nextStep = session.step + 1;
+  const instruksiNext = await getStepInstruction(nextStep, session.data.jenjang_kode);
+
+  if (instruksiNext) {
+    session.step = nextStep;
+    await sock.sendMessage(from, { text: instruksiNext.instruksi });
+  } else {
+    // kalau sudah tidak ada step lagi → simpan ke tabel pendaftaran
+    await supabase.from("pendaftaran_ppdb").insert([{ ...session.data }]);
+  }
 }
 
 // =====================================
