@@ -113,7 +113,7 @@ async function getKuota(jenjang = null) {
     if (error || !data || data.length === 0) return null;
 
     return (
-      "📊 *Kuota Pendaftaran Saat Ini:*" +
+      "📊 *Kuota Pendaftaran Saat Ini:* \n\n" +
       data.map(d => `- ${d.jenjang_kode}: *${d.jumlah}*`).join("\n")
     );
   }
