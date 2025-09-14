@@ -92,6 +92,35 @@ async function getPesan(kode) {
 }
 
 // =====================================
+// Helpers DB: ambil kuota
+// =====================================
+async function getKuota(jenjang = null) {
+  if (jenjang) {
+    const { data, error } = await supabase
+      .from("kuota_ppdb")
+      .select("jenjang_kode, jumlah")
+      .eq("jenjang_kode", jenjang)
+      .single();
+
+    if (error || !data) return null;
+    return `📌 Kuota ${jenjang}: *${data.jumlah}* pendaftar tersisa`;
+  } else {
+    const { data, error } = await supabase
+      .from("kuota_ppdb")
+      .select("jenjang_kode, jumlah")
+      .order("jenjang_kode");
+
+    if (error || !data || data.length === 0) return null;
+
+    return (
+      "📊 *Kuota Pendaftaran Saat Ini:*" +
+      data.map(d => `- ${d.jenjang_kode}: *${d.jumlah}*`).join("\n")
+    );
+  }
+}
+
+
+// =====================================
 // Utility Functions
 // =====================================
 function parseJenjang(text) {
