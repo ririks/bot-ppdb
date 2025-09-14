@@ -356,17 +356,20 @@ return sock.sendMessage(from, { text: withFooter(await getPesan("pendaftaran_ber
       }
 
       // deteksi FAQ keywords (hanya kalau tidak sedang di session)
-      const keywords = ["syarat", "jadwal", "kontak", "biaya", "alamat", "beasiswa", "pendaftaran"];
+      const keywords = ["syarat", "jadwal", "kontak", "kuota", "biaya", "alamat", "beasiswa", "pendaftaran"];
       const key = keywords.find(k => lower.includes(k));
       if (key) {
         let resp = null;
         if (key === "biaya" || key === "syarat") {
-          const jenjang = parseJenjang(text);
-          if (jenjang) resp = await getFaq(key, jenjang);
-          else resp = await getFaq(key);
-        } else {
-          resp = await getFaq(key);
-        }
+    const jenjang = parseJenjang(text);
+    if (jenjang) resp = await getFaq(key, jenjang);
+    else resp = await getFaq(key);
+  } else if (key === "kuota") {
+    const jenjang = parseJenjang(text);
+    resp = await getKuota(jenjang);
+  } else {
+    resp = await getFaq(key);
+  }
         return sock.sendMessage(from, { text: withFooter(resp || "❌ Info belum tersedia.") });
       }
 
